@@ -1,0 +1,92 @@
+---
+title: "checking labels"
+---
+
+```{r}
+library(tidyverse)
+files<-list.files("docs",full.names = T)
+labels<-files[str_detect(files,"labels")]
+#clusters<-files[str_detect(files,"clusters")]
+
+annot<-lapply(labels,read_csv)
+names(annot)<-str_remove_all(labels,"docs/|_label.+")
+annot<-lapply(names(annot),function(x) annot[[x]]%>%mutate(sample=x))%>%bind_rows()
+```
+
+```{r}
+nosubcols<-c("B/Plasma"="gold2", "Endothelial cells"="plum4", "EnEpi"="darkorange1","T/NK"= "deepskyblue4",
+             "EnS cells"="lightskyblue2", "Mast cells"="firebrick",Mesenchymal="burlywood3",
+             Mesothelial="gray51", Myeloid="springgreen4", "Smooth muscle cells"="lightpink2",
+             "low counts"="yellow1",non_human="hotpink","large cell"="purple2")
+
+annot<-annot%>%mutate(patient=str_remove(sample,"_.+"))
+annot<-annot%>%mutate(nosub=case_when(str_detect(labels,"Fibr|Mesen")~"Mesenchymal",
+                                      str_detect(labels,"EnS|KRT")~"EnS cells",
+                                      str_detect(labels,"T-|NK")~"T/NK",
+                                      str_detect(labels,"Macro|Dend")~"Myeloid",
+                                      str_detect(labels,"EnEp|\\+|Cili|Gland")~"EnEpi",
+                                      str_detect(labels,"B|Plas")~"B/Plasma",TRUE~labels))
+
+annot%>%count(patient,nosub)%>%ggplot(aes(x=patient,y=n,fill=nosub))+
+  geom_col(stat="identity",position="fill")+
+  theme(axis.text.x =element_text(angle=45,vjust = 1,hjust = 1) )+
+  scale_fill_manual(values=kelly.colours)+labs(x="Sample",y="Proportion")
+```
+
+
+#myeloid may be confounded with mesen or endothelial
+```{r}
+library(Seurat)
+
+countfiles<-files[str_detect(files,"pseu")]
+counts<-lapply(countfiles,read_csv)
+counts<-lapply(counts,column_to_rownames,"gene")
+
+meta<-lapply(1:length(counts),function(x)
+  as.data.frame(cbind(labels=colnames(counts[[x]]),
+                      sample=str_remove_all(countfiles[x],"docs.|_pse.+"))))%>%
+  bind_rows()
+meta<-meta%>%mutate(patient=str_remove(sample,"_.+"))
+counts<-counts%>%bind_cols()
+
+pb<-CreateSeuratObject(counts = counts,meta.data = meta)
+pb<-SCTransform(pb)
+pb<-RunPCA(pb)
+pb<-RunUMAP(pb,dims=1:15)
+p0<-DimPlot(pb,group.by = "nosub",cols=nosubcols)
+
+pb@meta.data<-pb@meta.data%>%mutate(nosub=case_when(str_detect(labels,"Fibr|Mesen")~"Mesenchymal",
+                                      str_detect(labels,"EnS|KRT")~"EnS cells",
+                                      str_detect(labels,"T-|NK")~"T/NK",
+                                      str_detect(labels,"Macro|Dend")~"Myeloid",
+                                      str_detect(labels,"EnEp|\\+|Cili|Gland")~"EnEpi",
+                                      str_detect(labels,"B|Plas")~"B/Plasma",TRUE~labels))
+p1<-DotPlot(pb,group.by = "nosub",features = c("MME","DCN","KRT10","ACTA2","A2M","CLDN1",
+                                               "EPCAM","CD3D","CD8A","CD79A","JCHAIN","CD68","KIT"))+
+  RotatedAxis()+scale_color_gradient2(low="blue",mid="white",high = "red")
+
+```
+# try correct by clustering
+```{r}
+files<-files[str_detect(files,"counts")]
+counts<-lapply(files,read_csv)
+counts<-lapply(1:length(counts),function(x)
+  counts[[x]]%>%mutate(sample=str_remove_all(files[x],"docs.|_.+")))%>%
+  bind_rows()
+
+```
+
+
+# top scores
+```{r}
+#loses Exhausted CD8 T-cells and Effector CD8 T-cells
+#mesen prop increases, still TNK<<myeloid
+clusters%>%group_by(predicted.id)%>%summarise(total=sum(total))%>%ungroup()%>%
+  mutate(prop=100*total/sum(total))%>%arrange(prop)
+```
+# verify DC identity 
+```{r}
+temp<-annot%>%count(sample,leiden_res,grpredicted.id)%>%group_by(sample,leiden_res)%>%mutate(prop=100*n/sum(n))%>%slice_max(prop)%>%ungroup()%>%filter(grpredicted.id=="Myeloid cells")
+annot<-temp%>%select(1,2)%>%left_join(annot)
+
+```
