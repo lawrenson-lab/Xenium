@@ -79,36 +79,64 @@ gc()
 #degREF<-FindAllMarkers(bulkref,group.by = "label")
 #write_csv(degREF,"bulkref.csv")
 ref<-read_csv("bulkref.csv")
-ref<-ref%>%filter(cluster%in%unique(annot$labels)&avg_log2FC>0)
+i<-annot%>%filter(nosub==ct)%>%distinct(labels)%>%unlist()
+ref<-ref%>%filter(cluster%in%i)
+i<-ref%>%filter(cluster%in%unlist(i)&avg_log2FC>0)%>%add_count(gene)%>%filter(n<6)%>%distinct(gene)%>%unlist()
 
 inte<-NormalizeData(inte)
-inte<-ScaleData(inte,features = unique(ref$gene))
+inte<-ScaleData(inte,features = i)
 gc()
 
-inte<-RunPCA(inte,features = unique(ref$gene))#is not using all features
+inte<-RunPCA(inte,features = i)#is not using all features
 inte <- harmony::RunHarmony(inte, group.by.vars="Sample")
-inte[["RNA"]]<-JoinLayers(inte[["RNA"]])
-inte<-RunUMAP(inte,min.dist = 0.001,repulsion.strength = 3,reduction = "harmony",features = unique(ref$gene))
+#inte[["RNA"]]<-JoinLayers(inte[["RNA"]])
+#inte<-RunUMAP(inte,min.dist = 0.001,repulsion.strength = 3,reduction = "harmony",features = i)
 gc()
 
-inte<-FindNeighbors(inte,reduction = "harmony",features = unique(ref$gene))
-scores<-scale(t(annot[,2:48]))
-scores[scores<0]<-0
-g<-inte@graphs$RNA_snn
-scores_smooth <- g %*% t(scores)
-inte$smoo_labels<-colnames(scores_smooth)[apply(scores_smooth,1,which.max)]
+inte<-FindNeighbors(inte,reduction = "harmony",features = i)
+#scores<-scale(t(annot[,2:48]))
+#scores[scores<0]<-0
+#g<-inte@graphs$RNA_snn
+#scores_smooth <- g %*% t(scores)
+#inte$smoo_labels<-colnames(scores_smooth)[apply(scores_smooth,1,which.max)]
 inte<-FindClusters(inte,algorithm = 4,resolution = .5)
-#temp<-inte@meta.data%>%count(seurat_clusters,labels)%>%group_by(seurat_clusters)%>%mutate(n=100*n/sum(n))%>%slice_max(n)
-#temp<-temp%>%filter(n<75)
-#inte@meta.data$clus<-inte$seurat_clusters
-#for(i in temp$seurat_clusters){
-#  inte<-FindSubCluster(inte,cluster = i,graph.name = "SCT_snn",algorithm = 4)
-#  inte@meta.data<-inte@meta.data%>%mutate(clus=ifelse(str_detect(sub.cluster,"_"),sub.cluster,clus))
-#}
+temp<-inte@meta.data%>%count(seurat_clusters,labels)%>%group_by(seurat_clusters)%>%mutate(n=100*n/sum(n))%>%slice_max(n)
+temp<-temp%>%filter(n<75)
+inte@meta.data$clus<-inte$seurat_clusters
+for(i in temp$seurat_clusters){
+  inte<-FindSubCluster(inte,cluster = i,graph.name = "RNA_snn",algorithm = 4)
+  inte@meta.data<-inte@meta.data%>%mutate(clus=ifelse(str_detect(sub.cluster,"_"),sub.cluster,clus))
+}
 
+percl<-inte@meta.data%>%count(clus,nosub)%>%group_by(clus)%>%mutate(n=100*n/sum(n))%>%slice_max(n)
+i<-percl%>%filter(nosub==ct)%>%distinct(clus)%>%unlist()
+temp<-percl%>%filter(clus%in%i)%>%select(-n)%>%inner_join(inte@meta.data)%>%
+  mutate(labels=str_remove(labels," \\(.+"))%>%
+  count(clus,labels)%>%group_by(clus)%>%slice_max(n)%>%
+  mutate(cl_label=labels)%>%select(cl_label)%>%ungroup()
+temp<-percl%>%filter(!clus%in%i)%>%select(-n)%>%inner_join(inte@meta.data)%>%
+  mutate(labels=str_remove(labels," \\(.+"))%>%count(clus,labels)%>%group_by(clus)%>%
+  slice_max(n)%>%mutate(cl_label=labels)%>%select(cl_label)%>%ungroup()%>%bind_rows(temp)
+#solve duplicates
+i<-temp%>%add_count(clus)%>%filter(n>1)%>%distinct(clus)%>%unlist()
+temp<-temp%>%filter(!clus%in%i)
+for(x in i){
+  temp<-temp%>%filter(str_detect(clus,str_replace(x,"_[0-9]+$","_")))%>%
+    count(cl_label)%>%slice_max(n)%>%select(cl_label)%>%mutate(clus=x)%>%
+    bind_rows(temp)}
+temp<-temp%>%add_count(clus)%>%mutate(cl_label=ifelse(n>1,"unknown",cl_label))%>%
+  select(-n)%>%distinct()
+#add
+temp<-inte@meta.data%>%select(barcode,clus)%>%inner_join(temp)
+temp<-temp[order(match(temp$barcode,colnames(inte))),]
+inte<-AddMetaData(inte,metadata = temp,col.name = "cl_label")
 
-temp<-inte@meta.data%>%select(seurat_clusters,smoo_labels)%>%rownames_to_column("barcode")
-temp<-inte@reductions$umap@cell.embeddings%>%as.data.frame()%>%rownames_to_column("barcode")%>%inner_join(temp)
+png(file=paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",
+                str_replace_all(ct,"/| ","_"),"_markers.png"),height = 600,width = 1100)
+DotPlot(inte,group.by = "cl_label",features =c("CD79A","CR2","MS4A1","CD1C","HLA-DRA","CLEC10A","VSIG4","S100A9","FCN1","IL1A","IL1B","IL1RN","TPSAB1","SIGLEC8","KIT","GZMB","GNLY","KLRC2","IGHG2","IGHG1","IGHA1","CD3D","CD8A","CD69","IL2RA","IL17A","TRDC","TRGC1","TRGC2","FAP","FN1","DCN","COL1A1","C7","FOXJ1","CLU","EPCAM","A2M","ACTA2"))+RotatedAxis()+scale_color_gradient2(low="blue",mid="white",high = "red")
+dev.off()
 
+temp<-inte@meta.data%>%select(barcode,labels,cl_label,clus)
+#temp<-inte@reductions$umap@cell.embeddings%>%bind_cols(temp)
 data.table::fwrite(temp,file=paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",
                                     str_replace_all(ct,"/| ","_"),"_labels.csv"))
