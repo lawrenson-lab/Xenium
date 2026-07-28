@@ -4,7 +4,7 @@ library(Seurat)
 library(SingleR)
 library(tidyverse)
 library(BiocParallel)
-#library(Matrix)
+#library(scDblFinder)
 
 slide<- commandArgs(trailingOnly=TRUE)
 #slide<-"/media/Xenium_On_NAS/20250428__202040__042825_Batch4Endometrioma_Rerun/output-XETG00426__0034237__EDV013__20250428__202100"
@@ -28,19 +28,28 @@ j<-xenium.obj@meta.data%>%slice_max(ratio,n=100)%>%rownames()
 j<-which(!colnames(xenium.obj)%in%j)
 xenium.obj<-subset(xenium.obj,cells=j)
 gc()
-#scDblFinder??????????????????
 
-xenium.obj <- SCTransform(xenium.obj,conserve.memory=TRUE,assay = "Xenium")
+sce<-as.SingleCellExperiment(xenium.obj)
+sce<-scDblFinder(sce,dbr.sd = 1)
+temp<-as.data.frame(sce@colData)
+#scDblFinder.class drops too many cells
+xenium.obj<-subset(xenium.obj,cells=which(temp$scDblFinder.score<1))
+rm(sce)
+gc()
+
+xenium.obj <- SCTransform(xenium.obj,conserve.memory=TRUE,assay = "counts")#keep changing assay
 gc()
 
 ####### comment when getting unsmoothed labels##################
-#xenium.obj<-RunPCA(xenium.obj)
-#xenium.obj <- FindNeighbors(xenium.obj, dims = 1:10,k.param=5)
-#g <- xenium.obj@graphs$SCT_snn
-#expr <- xenium.obj@assays$SCT$data
-#expr_smooth <- g %*% t(expr)
-#rm(xenium.obj)
-#gc()
+xenium.obj<-RunPCA(xenium.obj)
+xenium.obj <- FindNeighbors(xenium.obj, dims = 1:10,k.param=5)
+g <- xenium.obj@graphs$SCT_snn
+expr <- xenium.obj@assays$SCT$data
+W <- Matrix::Diagonal(x = 1-temp$scDblFinder.score,n = ncol(g))
+g <- g %*% W
+expr_smooth <- g %*% t(expr)
+rm(xenium.obj)
+gc()
 ################################################################
 
 #############ran once and saved as bulkref.RDS##################
@@ -79,27 +88,33 @@ gc()
 #
 #bulkref<-AggregateExpression(reference,group.by = c("SampleName","label"),return.seurat = T)
 #rm(reference);gc();
-##############################################################
 
 bulkref<-readRDS("bulkred.RDS")
-###########comment if smoothed labels#########################
-bulkref@meta.data<-bulkref@meta.data%>%mutate(label=str_remove(label," \\(.+"))
-##############################################################
+
+####### comment when getting unsmoothed labels#######################################
+bulkref@meta.data<-bulkref@meta.data%>%
+  mutate(label=case_when(str_detect(label,"Fibr|Mesen|GAS")~"Mesenchymal",
+                         str_detect(label,"EnEp|MUC5B|SOX9|IHH|Cili|Gland")~"EnEpi",
+                         str_detect(label,"T-|NK")~"T/NK",
+                         str_detect(label,"Macro|Dend")~"Myeloid",
+                         str_detect(label,"Meso")~"Mesothelial",
+                         str_detect(label,"B-|Plas")~"B/Plasma",TRUE~label))
+######################################################################################
+
 #remove genes with poor correlation????????????
 bp <- MulticoreParam(4)
 set.seed(112358)
 
 #start_time <- Sys.time()
-res <- SingleR(test=xenium.obj@assays$SCT$data,#unsmoothed labels
-               #test=t(expr_smooth),#smoothed labels
-               ref=bulkref@assays$SCT$data, 
-               labels=bulkref$label, method = "cosine",
-               #clusters = xenium.obj$seurat_clusters,
-               BPPARAM=bp,quantile = 0.999,tune.thresh = .1)
+res <- SingleR(#test=xenium.obj@assays$SCT$data,#unsmoothed labels
+  test=t(expr_smooth),#smoothed labels
+  ref=bulkref@assays$SCT$data, 
+  labels=bulkref$label, method = "cosine",
+  #clusters = xenium.obj$seurat_clusters,
+  BPPARAM=bp,quantile = 0.999,tune.thresh = .1)
 #end_time <- Sys.time()
 
 #fix filename smoothed vs unsmoothed
 res%>%as.data.frame()%>%rownames_to_column("barcode")%>%
-  data.table::fwrite(file=paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"unsm_labels.csv"))
+  data.table::fwrite(file=paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"_labels.csv"))
 
-#xenium.obj<-RunUMAP(xenium.obj,dims = 1:10,n.neighbors = 50,min.dist = .001,spread = .5)
