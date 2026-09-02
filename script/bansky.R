@@ -1,10 +1,13 @@
+#!/usr/bin/env Rscript
+
+start_time <- Sys.time()
+library(Banksy)
 library(Seurat)
 library(tidyverse)
-library(Banksy)
 library(SeuratWrappers)
 #library(scuttle)
 library(SingleR)
-library(BiocParallel)
+#library(BiocParallel)
 j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
      "CD27","CD38","BCL6","CXCR5","MME","JCHAIN","PRDM1","SDC1",
      "IGHA1","IGHG1","IGHG2","IGHG3","IGHG4","IGHM","NCAM1","FCGR3A",
@@ -13,6 +16,7 @@ j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
      "CCR7","CD44","IL7R","CD69","CTLA4","LAG3","PDCD1","TIGIT","HAVCR2",
      "TOX","CD1C","HLA-DRA","HLA-DPA1","ITGAM","CD68","CXCL10","CCL2",
      "NOS2","ARG1","CD163","IL10","EPCAM","KRT10","KRT18","KRT8","WT1",
+     "MUC5B","SOX9","SPDEF","LGR5",
      "PAX8","ESR1","FOXJ1","PAEP","PECAM1","PGR","IGF1","MMP11","FOXO1",
      "DCN","PDGFRA","THY1","COL1A1","ACTA2","TAGLN","MYL9","FAP","C7","GAS5")
 
@@ -25,8 +29,7 @@ xenium.obj <- LoadXenium(slide,fov="fov",
                          assay = "counts",
                          segmentations = "nucleus",
                          cell.centroids = T)
-slide<-str_remove(slide,".+output-")
-slide<-paste(unlist(str_split(slide,"__"))[3:2],collapse = "_")
+slide<-str_remove_all(slide,".+sis.|.ou.+")
 
 i<-rownames(xenium.obj)
 i<-i[str_detect(i,"fung|bact",negate=T)]
@@ -65,27 +68,29 @@ for (x in cls) {
 }
 
 bulkref<-readRDS("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/bulkref.RDS")
-bulkref<-subset(bulkref,cells=which(bulkref$label%in%c("Erythrocytes","Mesothelial")))
+bulkref<-subset(bulkref,cells=which(!bulkref$label%in%c("Erythrocytes","Mesothelial")))
 bulkref@meta.data<-bulkref@meta.data%>%
   mutate(sublabel=str_remove_all(label," \\(.+|Early ")%>%
-           str_replace("emmo","emo")%>%str_replace("Th.+","CD4 T-cells"))%>%
-  mutate(sublabel=if_else(str_detect(sublabel,"Macro"),"Macrophages",
-                          sublabel))
+           str_replace("emmo","emo")%>%str_replace("Th.+","CD4 T-cells"))
 bulkref@meta.data<-bulkref@meta.data%>%
   mutate(toplabel=case_when(str_detect(label,"Smoo|Fibr|Mesen|GAS")~"Mesenchymal",
                             str_detect(label,"Th")~"CD4 T-cells",
                             str_detect(label,"CD8")~"CD8 T-cells",
                             str_detect(label,"Gamm|NK")~"Gamma_NK",
                             str_detect(label,"B-|Plas")~"B_Plasma",
-                            str_detect(label,"EnEp|MUC5B|SOX9|IHH|Cili|Gland")~"Epithelial",
+                            str_detect(label,"EnEp|MUC5B|SOX9|IHH|Cili|Gland|KRT")~"Epithelial",
                             str_detect(label,"Macro|Dend")~"Myeloid",
                             TRUE~label))
 get_labels<-function(scobj,cluster_column,level){
+  ref<-bulkref
   bulkquery<-AggregateExpression(scobj,group.by = cluster_column,return.seurat = T)
   bulkquery<-ScaleData(bulkquery,assay = "counts",features = i)
+  if(level=="sublabel"){
+    ref<-subset(bulkref,subset=toplabel==scobj$percl_toplabel[1])
+  }
   res <- SingleR(test=bulkquery@assays$counts$scale.data,#this
-                 ref=bulkref@assays$SCT$data, 
-                 labels=bulkref@meta.data[,level], method = "cosine",
+                 ref=ref@assays$SCT$data, 
+                 labels=ref@meta.data[,level], method = "cosine",
                  quantile = 0.999,tune.thresh = .1)
   res<-as.data.frame(res)%>%rownames_to_column(cluster_column)
   res<-res%>%mutate(pruned.labels=str_replace_na(pruned.labels,"unknown"))
@@ -100,78 +105,38 @@ get_labels<-function(scobj,cluster_column,level){
 labels_percl<-get_labels(xenium.obj,"clus","toplabel")
 xenium.obj$percl_toplabel<-labels_percl$pruned.labels
 
-i<-xenium.obj@meta.data%>%
-  split(f = xenium.obj@meta.data$percl_toplabel)%>%
-  lapply(function(x) rownames(x))
-g<-lapply(i,function(x) xenium.obj@graphs$BANKSY_snn[x,x])
-expr<-xenium.obj@assays$counts$scale.data
-expr<-lapply(i,function(x) expr[,x])
-expr <- lapply(names(i), function(x) g[[x]] %*% t(expr[[x]]))
-names(expr)<-names(i)
-rm(g);gc()
-#bp <- MulticoreParam(6)
-labels_percl <- lapply(expr,function(x)
-  SingleR(test=t(x),#this
-          ref=bulkref@assays$SCT$scale.data, 
-          labels=bulkref$sublabel, method = "cosine",
-          BPPARAM=bp,quantile = 0.999,tune.thresh = .1)%>%
-    as.data.frame()%>%
-    mutate(pruned.labels=ifelse(is.na(pruned.labels),
-                                "unknown",pruned.labels)))
+#subgroup
+subxen<-lapply(unique(xenium.obj$percl_toplabel),function(x) subset(xenium.obj,subset=percl_toplabel==x))
+names(subxen)<-unique(xenium.obj$percl_toplabel)
+subxen<-subxen[sapply(subxen,function(x) length(unique(x$clus)))>1]
+labels_percl<-lapply(subxen,function(x) get_labels(x,"clus","sublabel"))
+labels_percl<-labels_percl%>%bind_rows()%>%
+  mutate(percl_sublabel=pruned.labels)%>%distinct(cell,percl_sublabel)
+labels_percl<-xenium.obj@meta.data%>%rownames_to_column("cell")%>%left_join(labels_percl)
+labels_percl<-labels_percl[order(match(labels_percl$cell,colnames(xenium.obj))),]
+labels_percl<-labels_percl%>%
+  mutate(percl_sublabel=ifelse(is.na(percl_sublabel),percl_toplabel,percl_sublabel))
+xenium.obj$percl_sublabel<-labels_percl$percl_sublabel
 
-labels_percl<-labels_percl%>%bind_rows()%>%rownames_to_column("cell")
-labels_percl<-xenium.obj@meta.data%>%rownames_to_column("cell")%>%
-  select(cell,clus,percl_toplabel)%>%inner_join(labels_percl)
-labels_percl<-labels_percl%>%#pivot_longer(scores.Activated.Fibro:scores.Th2.T.cells,
-  #     names_to = "ct",values_to = "score")%>%
-  mutate(nosub=case_when(str_detect(pruned.labels,"Smoo|Fibr|Mesen|GAS|EnS")~"Mesenchymal",
-                         str_detect(pruned.labels,"Th")~"CD4 T-cells",
-                         str_detect(pruned.labels,"CD8")~"CD8 T-cells",
-                         str_detect(pruned.labels,"Gamm|NK")~"Gamma_NK",
-                         str_detect(pruned.labels,"B-|Plas")~"B_Plasma",
-                         str_detect(pruned.labels,"EnEp|MUC5B|SOX9|IHH|Cili|Gland|Meso|KRT")~"Epithelial",
-                         str_detect(pruned.labels,"Macro|Dend")~"Myeloid",
-                         TRUE~pruned.labels))
-
-
-
-
-
-base_res<-0.5
-while(flag>0|base_res>0){
-  base_res<-base_res-.1
-  xenium.obj <- FindClusters(xenium.obj, resolution = base_res,algorithm = 4)
-  print(paste("Checking resolution",base_res))
-  labels_expre<-get_labels(paste0("BANKSY_snn_res.",base_res))
-  flag<-labels_expre%>%filter(str_detect(id,"Mese|^E",negate = T)&
-                                str_detect(features.plot,"EPCAM|KRT")&
-                                avg.exp.scaled>.1)%>%nrow()
-  gc()
-}
-
-
-bulkquery<-AggregateExpression(xenium.obj,group.by = c("clust_M1_lam0.2_k15_res2"),return.seurat = T)
-bulkquery<-ScaleData(bulkquery,assay = "counts",features = i)
-res <- SingleR(test=bulkquery@assays$counts$scale.data,#this
-               ref=bulkref@assays$SCT$data, 
-               labels=bulkref$sublabel, method = "cosine",
-               BPPARAM=bp,quantile = 0.999,tune.thresh = .1)
-res<-as.data.frame(res)
-temp$clust_M1_lam0.2_k15_res2<-as.numeric(temp$clust_M1_lam0.2_k15_res2)
-temp<-res%>%rownames_to_column("clust_M1_lam0.2_k15_res2")%>%
-  mutate(clust_M1_lam0.2_k15_res2=str_remove(clust_M1_lam0.2_k15_res2,"g")
-         %>%as.numeric(),
-         res2Labels=str_replace_na(pruned.labels,"missing"))%>%
-  select(clust_M1_lam0.2_k15_res2,res2Labels)%>%inner_join(temp)
-
-temp<-temp[order(match(temp$cell,colnames(xenium.obj))),]
-xenium.obj<-AddMetaData(xenium.obj,metadata = temp)
-
-png(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"bnksy_labels.png"),
+png(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"bnksy_toplabels.png"),
     width=1200,height=400)
-DotPlot(xenium.obj,group.by = "res0.5Label",features = j)+RotatedAxis()+
+DotPlot(xenium.obj,group.by = "percl_toplabel",features = j)+RotatedAxis()+
   scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
   theme(axis.text.x = element_text(size=8))
 dev.off()
+#png(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"bnksy_sublabels.png"),
+#    width=1200,height=400)
+#DotPlot(xenium.obj,group.by = "percl_sublabel",features = j)+RotatedAxis()+
+#  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+#  theme(axis.text.x = element_text(size=8))
+#dev.off()
 
-temp%>%data.table::fwrite(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"bnksy_labels.gz"))
+labels_percl%>%select(cell,clus,percl_toplabel,percl_sublabel)%>%
+  data.table::fwrite(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",
+                                   slide,"bnksy_labels.gz"))
+
+
+end_time <- Sys.time()
+print(paste("Lasted",end_time-start_time))
+
+
