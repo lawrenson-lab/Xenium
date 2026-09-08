@@ -1,0 +1,66 @@
+---
+title: "Meta-domains"
+---
+
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(cowplot)
+j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
+     "CD27","CD38","BCL6","CXCR5","MME","JCHAIN","PRDM1","SDC1",
+     "IGHA1","IGHG1","IGHG2","IGHG3","IGHG4","IGHM","NCAM1","FCGR3A",
+     "CD3D","TRDC","TRGC1","TRGC2","CD4","IL4","GATA3","CCR4","CXCR4",
+     "RORC","IL17A","STAT3","CCR6","FOXP3","IL2RA","CD8A","SELL",
+     "CCR7","CD44","IL7R","CD69","CTLA4","LAG3","PDCD1","TIGIT","HAVCR2",
+     "TOX","CD1C","HLA-DRA","HLA-DPA1","ITGAM","CD68","CXCL10","CCL2",
+     "NOS2","ARG1","CD163","IL10","EPCAM","KRT10","KRT18","KRT8","WT1",
+     "MUC5B","SOX9","SPDEF","LGR5",
+     "PAX8","ESR1","FOXJ1","PAEP","PECAM1","PGR","IGF1","MMP11","FOXO1",
+     "DCN","PDGFRA","THY1","COL1A1","ACTA2","TAGLN","MYL9","FAP","C7","GAS5")
+```
+
+```{r}
+files<-list.files("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels",full.names = T)
+label_files<-files[str_detect(files,"bnksy_labels.gz")]
+mat_files<-str_replace(label_files,"Law.+m_labels","Xenium_On_NAS/xenium_reanalysis")%>%
+  str_replace("bnksy.+","/outs")
+
+get_dom_avgs<-function(labelsF,matF){
+  labels<-data.table::fread(labelsF)
+  mat<-LoadXenium(matF,fov="fov",
+                  molecule.coordinates = F,
+                  assay = "counts")
+  mat<-subset(mat,cells=labels$cell)#should only keep human markers?
+  mat<-AddMetaData(mat,metadata = labels)
+  mat<-NormalizeData(mat)
+  avg<-AverageExpression(mat,
+                         group.by ="BANKSY_snn_lambda0.8_res.0.5",
+                         assays = "counts")
+return(avg$counts)}
+
+domats<-lapply(1:length(label_files),function(x) 
+  get_dom_avgs(label_files[x],mat_files[x]))
+
+temp<-sapply(domats,ncol)%>%as.data.frame()
+colnames(temp)<-"protodomain"
+temp$Slide<-str_remove_all(label_files,".+\\/|bnksy.+")
+```
+
+```{r}
+domat_concat<-do.call(cbind,domats)
+colnames(domat_concat)<-temp%>%apply(1,function(x) paste0(x[2],"_pd_",1:x[1]))%>%unlist()
+domat_concat<-domat_concat[-302,]#drop fungal-2 probe
+
+pcares<-prcomp(t(scale(domat_concat)))
+#pcares$x%>%as.data.frame()%>%ggplot(aes(x=PC1,y=PC2))+geom_point(size=1)
+temp<-as.data.frame(cbind(colname=colnames(domat_concat),Slide=str_remove(colnames(domat_concat),"_pd.+")))
+harmonized<-harmony::RunHarmony(t(pcares$x),meta_data=temp,vars_use="Slide")
+lala<-RunUMAP(harmonized)
+
+neighs<-FindNeighbors(harmonized)
+clus<-FindClusters(neighs$snn,resolution = 1,algorithm = 4)
+p1<-lala@cell.embeddings%>%as.data.frame()%>%ggplot(aes(x=UMAP_1,y=UMAP_2,col=clus$res.1))+geom_point()+scale_colour_manual(values = kelly.colours)
+
+Heatmap(scale(domat_concat),top_annotation = HeatmapAnnotation(cl=clus$res.1,col = list(cl=kelly.colours)),clustering_method_columns = "ward.D2",show_column_names = F,use_raster = F,col = colorRamp2(c(-2,0,6), c("blue","white","red")),name="z",row_names_gp = gpar(fontsize=5))
+```
