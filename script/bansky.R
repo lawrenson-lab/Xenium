@@ -40,8 +40,8 @@ mat<-Matrix::Matrix(as.matrix(mat))
 sc<-CreateSeuratObject(counts = mat)
 rm(transcripts);gc()
 
-qced<-data.table::fread(paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/",
-                               slide,"bnksy_labels.gz"))#change for domains
+qced<-data.table::fread(paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/Banksy_matrix/",
+                               slide,"l0.8_bnksy_mtrx.gz"))#change for domains
 sc<-subset(sc,cells = qced$cell)
 rm(mat,qced);gc()
 
@@ -49,7 +49,7 @@ coords<-coords%>%filter(cell_id%in%colnames(sc))
 coords<-coords[order(match(coords$cell_id,colnames(sc))),]
 sc<-AddMetaData(sc,
                 metadata = coords%>%column_to_rownames("cell_id"))
-print("Seurat object ready")
+#print("Seurat object ready")
 
 #sc<-NormalizeData(sc,scale.factor = median(sc$nucleus_area))
 f<-median(sc$nucleus_area)/sc$nucleus_area
@@ -58,7 +58,7 @@ sc@assays$RNA["data"]<-t(t(sc@assays$RNA$counts)*f)
 set.seed(1000)
 sc@assays$RNA$data<-as.matrix(sc@assays$RNA$data)
 sc <- RunBanksy(sc, lambda = .2, verbose=TRUE, 
-                assay = 'data',features = "all",
+                assay = 'RNA',features = "all",
                 use_agf=T,dimx = "x_centroid",dimy = "y_centroid")
 sc <- RunPCA(sc, assay = 'BANKSY',
              rownames(sc),npcs = 30)
