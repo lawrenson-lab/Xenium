@@ -43,32 +43,23 @@ rm(transcripts);gc()
 qced<-data.table::fread(paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/",
                                slide,"bnksy_labels.gz"))#change for domains
 sc<-subset(sc,cells = qced$cell)
-rm(mat);gc()
+rm(mat,qced);gc()
 
 coords<-coords%>%filter(cell_id%in%colnames(sc))
 coords<-coords[order(match(coords$cell_id,colnames(sc))),]
-centroids<-coords%>%select(cell_id:y_centroid)%>%
-  column_to_rownames("cell_id")%>%
-  CreateCentroids()
-fov_obj <- CreateFOV(
-  coords = list(centroids = centroids),
-  type = "centroids",
-  assay = "RNA")
-sc@images[["fov"]]<-fov_obj
-rm(centroids,coords)
-
-print("Seurat object ready")
 sc<-AddMetaData(sc,
-                metadata = coords%>%column_to_rownames("cell_id"),
-                col.name = "nucleus_area")
-sc<-NormalizeData(sc)
-sc<-ScaleData(sc,vars.to.regress = "nucleus_area")
+                metadata = coords%>%column_to_rownames("cell_id"))
+print("Seurat object ready")
 
-#lambda <- c(0.2,0.8)##lambda 0.8 for domains
+#sc<-NormalizeData(sc,scale.factor = median(sc$nucleus_area))
+f<-median(sc$nucleus_area)/sc$nucleus_area
+sc@assays$RNA["data"]<-t(t(sc@assays$RNA$counts)*f)
+#sc<-ScaleData(sc)
 set.seed(1000)
 sc@assays$RNA$data<-as.matrix(sc@assays$RNA$data)
 sc <- RunBanksy(sc, lambda = .2, verbose=TRUE, 
-                assay = 'RNA',features = "all",use_agf=T)
+                assay = 'data',features = "all",
+                use_agf=T,dimx = "x_centroid",dimy = "y_centroid")
 sc <- RunPCA(sc, assay = 'BANKSY',
              rownames(sc),npcs = 30)
 #sc<-RunUMAP(sc,dims=1:20,spread = 3,min_dist = 0.1)
@@ -85,7 +76,7 @@ for (x in cls) {
     mutate(clus=ifelse(str_detect(sub.cluster,"_"),sub.cluster,clus))
 }
 
-bulkref<-readRDS("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/bulkref.RDS")
+bulkref<-readRDS("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/bulkref.RDS")
 bulkref<-subset(bulkref,subset=label!="Erythrocytes")
 bulkref@meta.data<-bulkref@meta.data%>%
   mutate(sublabel=str_remove_all(label," \\(.+|Early ")%>%
@@ -121,6 +112,7 @@ get_labels<-function(scobj,cluster_column,level){
   return(res)}
 #labels_percl<-get_labels("BANKSY_snn_res.0.5","toplabel")
 #sc$res0.5Label<-labels_percl$pruned.labels
+i<-rownames(sc@assays$RNA)
 labels_percl<-get_labels(sc,"clus","toplabel")
 sc$percl_toplabel<-labels_percl$pruned.labels
 
@@ -138,38 +130,22 @@ labels_percl<-labels_percl%>%
   mutate(percl_sublabel=ifelse(is.na(percl_sublabel),percl_toplabel,percl_sublabel))
 sc$percl_sublabel<-labels_percl$percl_sublabel
 
-png(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"bnksy_toplabels.png"),
+png(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/",slide,"bnksy_toplabels.png"),
     width=1200,height=300)
 DotPlot(sc,group.by = "percl_toplabel",features = j)+RotatedAxis()+
   scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
   theme(axis.text.x = element_text(size=8))
 dev.off()
-png(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",slide,"bnksy_sublabels.png"),
+png(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/",slide,"bnksy_sublabels.png"),
     width=1200,height=400)
 DotPlot(sc,group.by = "percl_sublabel",features = j)+RotatedAxis()+
   scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
   theme(axis.text.x = element_text(size=8))
 dev.off()
 
-labels_percl<-labels_percl%>%select(cell,clus,percl_toplabel,percl_sublabel)
-
-sc <- RunBanksy(sc, lambda = .8, verbose=TRUE, 
-                assay = 'RNA',features = "all",use_agf=T)
-sc <- RunPCA(sc, assay = 'BANKSY',
-             rownames(sc),npcs = 30)
-sc <- FindNeighbors(sc, dims = 1:30,k.param = 30)
-sc <- FindClusters(sc, resolution = 0.5,algorithm = 4)
-sc@meta.data%>%rownames_to_column("cell")%>%
-  mutate(BANKSY_snn_lambda0.8_res.0.5=BANKSY_snn_res.0.5)%>%
-  select(cell,BANKSY_snn_lambda0.8_res.0.5)%>%
-  inner_join(labels_percl)%>%
-  data.table::fwrite(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",
+labels_percl%>%select(cell,clus,percl_toplabel,percl_sublabel)%>%
+  data.table::fwrite(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/",
                                    slide,"bnksy_labels.gz"))
-
-temp<-sc@reductions$pca@cell.embeddings
-temp%>%as.data.frame()%>%rownames_to_column("cell")%>%
-  data.table::fwrite(file = paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/CosMx_temp/Xenium_labels/",
-                                   slide,"l0.8_bnksy_pca.gz"))
 
 end_time <- Sys.time()
 end_time-start_time
