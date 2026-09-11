@@ -4,6 +4,7 @@ library(tidyverse)
 library(Seurat)
 library(Banksy)
 library(SeuratWrappers)
+library(dbscan)
 files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
 files<-files[str_detect(files,"TMA")]
 files<-files[1:8]#5k panel, all come from the same slide
