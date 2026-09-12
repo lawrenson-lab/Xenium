@@ -1,0 +1,134 @@
+---
+title: "domains"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(dbscan)
+library(clusterProfiler)
+
+cols<-c("#E41A1C","#536D9E","#459E6E","#727E76","#B6656D","#F29022","#F781BF","#C598C9",
+        "#AD6D5E","#7D8285","#4385BF","#204175","#1B9E77","#98D486","#D2C92D","#EFAC4C",
+        "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#B970A2","#A82676","#655D9B",
+        "#8CA77B","#17542A","#94A908","#C8DD34","#8FC9BF","white")
+
+meta<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
+temp<-meta%>%select(x_centroid,y_centroid)%>%dbscan(eps = 100)
+meta$circle<-temp$cluster
+meta<-meta%>%mutate(circle=ifelse(circle==5&y_centroid>6000,500,circle))
+meta<-meta%>%mutate(Core_ID=case_when(circle<4~'1',
+                                      circle%in%c(5,9,10)~'2',#1
+                                      circle%in%c(6,7,500)~'3',#2
+                                      circle%in%c(14:16)~'4',#3
+                                      circle%in%c(12,13,17)~'5',#3
+                                      circle%in%c(4,24,25)~'9',#4
+                                      circle%in%c(21:23)~'7',#4
+                                      circle%in%c(18:20)~'6',#4
+                                      circle%in%c(46,45)~'10',#5
+                                      circle%in%c(54,53,38)~'11',#5
+                                      circle%in%c(37,39,40)~'12',#5
+                                      circle%in%c(34:36)~'13',#5
+                                      circle%in%c(55:57)~'16',#5
+                                      circle%in%c(58:60)~'17',#5
+                                      circle%in%c(48:50)~'18',#5
+                                      circle%in%c(42:44)~'19',#5
+                                      circle%in%c(41,51,52)~'20',#5
+                                      circle%in%c(73,66,63)~'14',#6
+                                      circle%in%c(72,65,64)~'15',#6
+                                      circle%in%c(67:69)~'23',#6
+                                      circle%in%c(71,75,76)~'24',#6
+                                      circle%in%c(85,84,82)~'21',#7
+                                      circle%in%c(81,77,79)~'22',#7
+                                      circle%in%c(94,93,91)~'26',#8
+                                      circle%in%c(90)~'25',#8
+                                      circle%in%c(95,96)~'28',#8
+                                      circle%in%c(89,104)~'29',#8
+                                      circle%in%c(102,100)~'30',#8
+                                      circle%in%c(101,103)~'31',
+                                      TRUE~"discarded"))
+meta<-meta%>%add_count(circle)%>%filter(n>500)
+names(cols)<-sort(unique(meta$Core_ID))
+meta%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=Core_ID))+geom_point(size=.1)+geom_text(data=meta%>%group_by(circle)%>%summarise(x_centroid=median(x_centroid),y_centroid=median(y_centroid)),aes(label=circle),col="black")+guides(col=guide_legend(override.aes = list(size=3)))+scale_color_manual(values=cols)
+```
+
+```{r}
+meta<-meta%>%mutate(orig.ident=str_remove(cell,"^.+_"))
+i<-meta%>%split(f = meta$Section)%>%lapply(function(x) x$orig.ident)
+
+files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
+files<-files[str_detect(files,"TMA")]
+files<-files[1:8]
+xenium.list<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
+xenium.list<-lapply(names(i),xenium.list,function(x) x$`Gene Expression`)
+names(xenium.list)<-str_remove(files,".+sis.")
+
+xenium.list<-lapply(xenium.list,function(x) CreateSeuratObject(counts = x))
+xenium.list<-lapply(names(i),function(x) 
+  subset(xenium.list[[x]],cells=which(colnames(xenium.list[[x]])%in%i[[x]])))
+names(xenium.list)<-names(i)
+
+inte<-merge(xenium.list[[1]],y = xenium.list[names(xenium.list)[-1]],
+            add.cell.ids =names(xenium.list))
+meta<-meta[order(match(meta$cell,colnames(inte))),]
+inte<-AddMetaData(inte,metadata = meta%>%column_to_rownames("cell"))
+
+#####################################################################################needed?                    
+inte<-NormalizeData(inte)                                                           #
+inte<-FindVariableFeatures(inte)                                                    #
+inte<-ScaleData(inte)                                                               #
+inte<-RunPCA(inte)                                                                  #
+inte <- IntegrateLayers(inte, method = HarmonyIntegration, orig.reduction = "pca")  #
+inte[["RNA"]]<-JoinLayers(inte[["RNA"]])
+```
+
+```{r}
+#meta%>%count(Core_ID,res0.5)%>%mutate(Core_ID=factor(Core_ID,levels=sort(as.numeric(unique(meta$Core_ID)))))%>%ggplot(aes(y=Core_ID,x=n,fill=as.factor(res0.5)))+geom_col(stat="identity",position = "fill")+scale_fill_manual(values=cols)+labs(x="Prop")+theme(legend.position = "n")
+p0<-meta%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=as.factor(res0.5)))+
+  geom_point(size=.1)+scale_color_manual(values=cols)+theme(legend.position = 'n')
+p1<-meta%>%distinct(Core_ID,res0.5)%>%count(res0.5)%>%
+  ggplot(aes(x=n,y=as.factor(res0.5),fill=as.factor(res0.5)))+
+  geom_col()+geom_text(aes(x=n+1,label=n))+
+  scale_fill_manual(values=cols)+theme(legend.position = "n")+
+  labs(x="Cores",y="Domain")
+
+pb<-AggregateExpression(inte,group.by = c("Core_ID","res0.5"),return.seurat = T)
+domDEG<-FindAllMarkers(pb,group.by = "res0.5")# DESeq2 cannot compute log geometric means
+
+i<-domDEG%>%group_by(cluster)%>%slice_max(avg_log2FC)%>%
+  ungroup()%>%distinct(gene)%>%unlist()
+j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
+     "CD27","CD38","BCL6","CXCR5","MME","JCHAIN","PRDM1","SDC1",
+     "IGHA1","IGHG1","IGHG2","IGHG3","IGHG4","IGHM","NCAM1","FCGR3A",
+     "CD3D","TRDC","TRGC1","TRGC2","CD4","IL4","GATA3","CCR4","CXCR4",
+     "RORC","IL17A","STAT3","CCR6","FOXP3","IL2RA","CD8A","SELL",
+     "CCR7","CD44","IL7R","CD69","CTLA4","LAG3","PDCD1","TIGIT","HAVCR2",
+     "TOX","CD1C","HLA-DRA","HLA-DPA1","ITGAM","CD68","CXCL10","CCL2",
+     "NOS2","ARG1","CD163","IL10","EPCAM","KRT10","KRT18","KRT8","WT1",
+     "MUC5B","SOX9","SPDEF","LGR5",
+     "PAX8","ESR1","FOXJ1","PAEP","PECAM1","PGR","IGF1","MMP11","FOXO1",
+     "DCN","PDGFRA","THY1","COL1A1","ACTA2","TAGLN","MYL9","FAP","C7","GAS5")
+p3<-domDEG%>%filter(gene%in%unique(c(i,j)))%>%
+  mutate(cluster=factor(cluster,levels=1:20))%>%
+  ggplot(aes(x=as.factor(cluster),y=gene,
+        colour = avg_log2FC,size = p_val_adj))+geom_point()+
+  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b",
+                        oob = scales::squish,limits=c(-4,4))+
+  scale_size(range = c(5,1),breaks = c(1e-8,1e-5,1e-2,1))+
+  theme_minimal()+labs(x="Domain",col="LFC",size="Padj")
+
+i<-domDEG%>%filter(avg_log2FC>0&p_val_adj<0.05)
+i<-i%>%split(f = i$cluster)%>%lapply(function(x) x$gene)
+i<-i[sapply(i,length)>1]
+orares<-lapply(i,function(x) 
+  enrichGO(x,OrgDb = "org.Hs.eg.db",keyType = "SYMBOL",ont = "BP"))
+orares<-lapply(orares,simplify)
+orares<-lapply(names(orares),function(x) 
+  as.data.frame(orares[[x]])%>%mutate(cluster=x))%>%bind_rows()
+i<-orares%>%filter(Count>4)%>%group_by(cluster)%>%
+  slice_max(Count,n=2)%>%ungroup()%>%distinct(Description)%>%unlist()
+p2<-orares%>%filter(Description%in%i)%>%
+  ggplot(aes(x=cluster,y=Description,col=FoldEnrichment,size=p.adjust))+
+  geom_point()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b",
+                                     oob = scales::squish,limits=c(0,20))+
+  scale_size(range = c(5,1),trans="log10")+theme_minimal()+labs(x="Domain")
