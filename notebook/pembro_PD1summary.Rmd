@@ -1,0 +1,66 @@
+---
+  title: "PD1 percentage"
+---
+  
+```{r}
+library(tidyverse)
+library(Seurat)
+
+files<-list.files("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro",full.names = T)
+files<-files[str_detect(files,"labels.gz")]
+files<-files[str_detect(files,"UTP|Prime",negate = T)]
+
+meta<-lapply(files,data.table::fread)
+files<-str_remove_all(files,".+bro.|bnk.+")
+names(meta)<-files
+meta<-lapply(files,function(x) meta[[x]]%>%mutate(Section=x))%>%bind_rows()
+meta<-meta%>%mutate(cell_id=paste0(Section,"_",cell))
+
+coords<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
+meta<-coords%>%select(cell_id,x_centroid,y_centroid,circle,Core_ID,responder)%>%inner_join(meta)
+
+```
+
+# Load expression data
+```{r}
+files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
+files<-files[str_detect(files,"Pro")]
+files<-files[str_detect(files,"UTP",negate=T)]
+xenium.list<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
+prote.list<-lapply(xenium.list,function(x) x$`Protein Expression`)
+names(xenium.list)<-str_remove(files,".+sis.")
+names(prote.list)<-str_remove(files,".+sis.")
+
+prote.list<-lapply(prote.list,function(x) CreateSeuratObject(counts = x))
+inteP<-merge(prote.list[[1]],y = prote.list[names(prote.list)[-1]],
+            add.cell.ids =names(prote.list))
+inteP<-subset(inteP,cells=meta$cell_id)
+meta<-meta[order(match(meta$cell_id,colnames(inteP))),]
+inteP<-AddMetaData(inteP,metadata = meta%>%column_to_rownames("cell_id"))
+rm(prote.list)
+
+inteP<-NormalizeData(inteP)
+inteP<-ScaleData(inteP,features = rownames(inteP))
+inteP<-RunPCA(inteP,features = rownames(inteP))
+inteP<-IntegrateLayers(inteP,method = "HarmonyIntegration")
+inteP[["RNA"]]<-JoinLayers(inteP[["RNA"]])
+
+```
+
+# Summary table
+```{r}
+
+temp<-inte@assays$RNA$data
+temp<-temp%>%t()%>%as.data.frame()%>%rownames_to_column("cell_id")%>%
+  inner_join(meta)
+res<-temp%>%filter(PanCK>0)%>%count(Core_ID,name = "PanCKcells")
+res<-temp%>%filter(`PD-1`>0)%>%count(Core_ID,name = "PD1cells")%>%inner_join(res)
+res<-temp%>%filter(`PD-L1`>0)%>%count(Core_ID,name = "PDL1cells")%>%inner_join(res)
+res<-temp%>%count(Core_ID,responder,name = "total")%>%inner_join(res)
+
+p0<-res%>%filter(Core_ID%in%i)%>%mutate(cps=ifelse((PDL1cells/PanCKcells)>1,100,100*PDL1cells/PanCKcells),tumor=PanCKcells,across(PDL1cells:PanCKcells,function(x) 100*x/total))%>%ggplot(aes(x=PanCKcells,y=PD1cells,shape=responder,col=cps,size=tumor))+geom_point(alpha=.5)+geom_text_repel(aes(label=Core_ID))+labs(x="Cell %: PanCK > 0",y="Cell %: PD1 > 0")+scale_color_viridis_c(option = 'H')
+p1<-res%>%filter(Core_ID%in%i)%>%mutate(cps=ifelse((PDL1cells/PanCKcells)>1,100,100*PDL1cells/PanCKcells),tumor=PanCKcells,across(PDL1cells:PanCKcells,function(x) 100*x/total))%>%ggplot(aes(x=PanCKcells,y=PDL1cells,shape=responder,col=cps,size=tumor))+geom_point(alpha=.5)+geom_text_repel(aes(label=Core_ID))+labs(x="Cell %: PanCK > 0",y="Cell %: PDL1 > 0")+scale_color_viridis_c(option = 'H')
+p2<-res%>%filter(Core_ID%in%i)%>%mutate(cps=ifelse(PDL1cells/PanCKcells>1,100,100*PDL1cells/PanCKcells),tumor=PanCKcells,across(PDL1cells:PanCKcells,function(x) 100*x/total))%>%ggplot(aes(x=PD1cells,y=PDL1cells,shape=responder,col=cps,size=tumor))+geom_point(alpha=.5)+geom_text_repel(aes(label=Core_ID))+labs(x="Cell %: PD1 > 0",y="Cell %: PDL1 > 0")+scale_color_viridis_c(option = 'H')
+
+```
+

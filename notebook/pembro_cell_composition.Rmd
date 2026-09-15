@@ -1,0 +1,229 @@
+---
+title: "Cell composition"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+library(dbscan)
+library(speckle)
+library(limma)
+cols<-c("#E41A1C","#536D9E","#459E6E","#727E76","#B6656D","#F29022","#F781BF","#C598C9",
+        "#AD6D5E","#7D8285","#4385BF","#204175","#1B9E77","#98D486","#D2C92D","#EFAC4C",
+        "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#B970A2","#A82676","#655D9B",
+        "#8CA77B","#17542A","#94A908","#C8DD34","#8FC9BF","white")
+
+files<-list.files("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro",full.names = T)
+files<-files[str_detect(files,"labels.gz")]
+files<-files[str_detect(files,"UTP",negate = T)]
+
+labels<-lapply(files,data.table::fread)
+files<-str_remove_all(files,".+bro.|bnk.+")
+names(labels)<-files
+labels<-lapply(files,function(x) labels[[x]]%>%mutate(Section=x))%>%bind_rows()
+```
+
+# Coordinates
+```{r}
+coords<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
+coords5k<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")
+
+temp<-coords%>%select(x_centroid,y_centroid)%>%dbscan(eps = 100)
+coords$circle<-temp$cluster
+#meta<-meta%>%mutate(circle=ifelse(circle==5&y_centroid>6000,500,circle))
+coords<-coords%>%mutate(Core_ID=case_when(circle%in%c(40:42)~'1',
+                                      circle%in%c(1,38,39)~'2',#1
+                                      circle%in%c(2,6,37)~'3',#1
+                                      circle%in%c(36,14,13)~'4',#1
+                                      circle%in%c(12,8,15)~'5',#1
+                                      circle%in%c(7,29,35)~'10',#1
+                                      circle%in%c(5,34,30)~'9',#1
+                                      circle%in%c(16:18)~'7',#1
+                                      circle%in%c(9:11)~'6',#1
+                                      circle%in%c(28,27,25)~'11',#1
+                                      circle%in%c(26,24,19)~'12',#1
+                                      circle%in%c(21:23)~'13',#1
+                                      circle%in%c(4,3,44)~'14',#1
+                                      circle%in%c(74,75,69)~'19',#2
+                                      circle%in%c(70,67,66)~'18',#2
+                                      circle%in%c(61,60,54)~'17',#2
+                                      circle%in%c(50,52,53)~'16',#2
+                                      circle%in%c(51,47,49)~'15',#2
+                                      circle%in%c(73,68,71)~'20',#2
+                                      circle%in%c(72,59,58)~'21',#2
+                                      circle%in%c(55:57)~'22',#2
+                                      circle%in%c(62:64)~'23',#2
+                                      circle%in%c(65,48,76)~'24',#2
+                                      circle%in%c(82:84)~'26',#3
+                                      circle%in%c(81)~'25',#3
+                                      circle%in%c(89,85)~'28',#3
+                                      circle%in%c(92,91)~'29',#3
+                                      circle%in%c(80,79)~'30',
+                                      circle%in%c(77,78)~'31',
+                                      TRUE~"discarded"))
+names(cols)<-sort(unique(coords$Core_ID))
+coords%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=Core_ID))+geom_point(size=.1)+
+  geom_text(data=coords%>%group_by(circle)%>%summarise(x_centroid=median(x_centroid),
+                                                     y_centroid=median(y_centroid)),aes(label=circle),col="black")+
+  guides(col=guide_legend(override.aes = list(size=3)))+scale_color_manual(values=cols)
+
+temp<-coords5k%>%select(x_centroid,y_centroid)%>%dbscan(eps = 100)
+coords5k$circle<-temp$cluster
+coords5k<-coords5k%>%mutate(circle=ifelse(circle==4&y_centroid>6000,400,circle))
+coords5k<-coords5k%>%mutate(Core_ID=case_when(circle<4~'1',
+                                      circle%in%c(4,8,9)~'2',#1
+                                      circle%in%c(5,6,400)~'3',#2
+                                      circle%in%c(13:15)~'4',#3
+                                      circle%in%c(11,12,16)~'5',#3
+                                      circle%in%c(23:25)~'9',#4
+                                      circle%in%c(20:22)~'7',#4
+                                      circle%in%c(17:19)~'6',#4
+                                      circle%in%c(46,45)~'10',#5
+                                      circle%in%c(54,53,38)~'11',#5
+                                      circle%in%c(37,39,40)~'12',#5
+                                      circle%in%c(34:36)~'13',#5
+                                      circle%in%c(55:57)~'16',#5
+                                      circle%in%c(58:60)~'17',#5
+                                      circle%in%c(48:50)~'18',#5
+                                      circle%in%c(42:44)~'19',#5
+                                      circle%in%c(41,51,52)~'20',#5
+                                      circle%in%c(73,66,63)~'14',#6
+                                      circle%in%c(72,65,64)~'15',#6
+                                      circle%in%c(67:69)~'23',#6
+                                      circle%in%c(71,75,76)~'24',#6
+                                      circle%in%c(85,84,82)~'21',#7
+                                      circle%in%c(81,77,79)~'22',#7
+                                      circle%in%c(94,93,91)~'26',#8
+                                      circle%in%c(90)~'25',#8
+                                      circle%in%c(95,96)~'28',#8
+                                      circle%in%c(89,104)~'29',#8
+                                      circle%in%c(102,100)~'30',#8
+                                      circle%in%c(101,103)~'31',
+                                      TRUE~"discarded"))
+
+coords<-coords%>%mutate(panel="Protein")
+coords<-coords5k%>%mutate(panel="5k")%>%bind_rows(coords)
+
+#coords%>%filter(panel=="Protein")%>%select(-panel)%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
+#coords%>%filter(panel=="5k")%>%select(-panel)%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")
+```
+
+# Plot
+```{r}
+cols<-c("#D8227D","#536D9E","#459E6E","#EFAC4C","#F781BF","#C598C9",
+        "#4385BF","#18ABB8","#910241","#E41A1C","#8FC9BF","white")
+names(cols)<-unique(labels$percl_toplabel)
+
+labels<-labels%>%mutate(cell_id=paste0(Section,"_",cell))
+labels<-coords%>%select(cell_id,x_centroid,y_centroid,panel,circle,Core_ID,responder)%>%inner_join(labels)
+labels<-labels%>%add_count(panel,circle)%>%filter(n>500)
+
+plots<-lapply(unique(labels$Core_ID),function(i)
+  labels%>%filter(Core_ID==i)%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=percl_toplabel))+
+    geom_point(size=.1)+facet_grid(cols=vars(panel),scales="free",space="free")+
+    scale_color_manual(values=cols)+guides(col=guide_legend(override.aes = list(size=3)))+
+    ggtitle(paste0("Core_ID=",i))+theme(legend.position = "n"))
+
+labels%>%count(percl_toplabel)%>%ggplot(aes(x=n,y=percl_toplabel,fill=percl_toplabel))+geom_col()+geom_text(aes(label=n))+scale_fill_manual(values=cols)+theme(legend.position = "n")
+```
+
+# Contrast
+```{r}
+temp<-read_tsv("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/PEmbro_TMA_deidentified.tsv")
+labels<-labels%>%mutate(Core_ID=as.numeric(Core_ID))%>%left_join(temp,by = c("Core_ID"="Core ID"))
+
+temp<-labels%>%filter(panel=="Protein")
+temp<-temp%>%mutate(Gr=ifelse(responder==T,"responder","non_responder"))
+run_speckle<-function(metadata){
+  props<-getTransformedProps(metadata$percl_toplabel,
+                           metadata$StudyID)
+  ids<-metadata%>%distinct(Gr,StudyID)
+  designM<-model.matrix(~0+Gr,data=ids)#but Cores are not independent 
+
+  props<-props$TransformedProps[,ids$StudyID]
+  fit<-lmFit(props,designM)
+  cont<-makeContrasts(Grresponder-Grnon_responder,levels = designM)
+  fit<-contrasts.fit(fit,cont)
+  fit <- eBayes(fit, robust=TRUE)
+  res<-topTable(fit,number = nrow(props),coef = 1)
+return(res)}
+proteinres<-run_speckle(temp)
+temp<-labels%>%filter(panel=="5k")
+temp<-temp%>%mutate(Gr=ifelse(responder==T,"responder","non_responder"))
+res5k<-run_speckle(temp)
+
+temp<-proteinres%>%rownames_to_column("ct")%>%mutate(proteinLFC=logFC)%>%select(ct,proteinLFC)
+temp<-res5k%>%rownames_to_column("ct")%>%mutate(LFC5k=logFC)%>%select(ct,LFC5k)%>%inner_join(temp)
+temp%>%ggplot(aes(x=proteinLFC,y=LFC5k,col=ct,label=ct))+geom_point(size=3)+geom_text_repel()+scale_color_manual(values=cols)+geom_vline(xintercept = 0)+geom_hline(yintercept = 0)
+```
+
+# Verify markers
+## 5k
+```{r}
+files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
+files<-files[str_detect(files,"TMA")]
+files<-files[str_detect(files,"Prime")]
+files<-files[str_detect(files,"UTP",negate = T)]
+
+xenium.list<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
+names(xenium.list)<-str_remove(files,".+sis.")
+xenium.list<-lapply(xenium.list,function(x) x$`Gene Expression`)
+xenium.list<-lapply(xenium.list,function(x) CreateSeuratObject(counts = x))
+inte<-merge(xenium.list[[1]],y = xenium.list[names(xenium.list)[-1]],
+            add.cell.ids =names(xenium.list))
+rm(xenium.list)
+
+inte<-subset(inte,cells = labels$cell_id)
+temp<-labels%>%filter(cell_id%in%colnames(inte))
+temp<-temp[order(match(temp$cell_id,colnames(inte))),]
+inte<-AddMetaData(inte,metadata = temp%>%column_to_rownames("cell_id"),col.name = "percl_toplabel")
+
+j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
+     "CD27","CD38","BCL6","CXCR5","MME","JCHAIN","PRDM1","SDC1",
+     "IGHA1","IGHG1","IGHG2","IGHG3","IGHG4","IGHM","NCAM1","FCGR3A",
+     "CD3D","TRDC","TRGC1","TRGC2","CD4","IL4","GATA3","CCR4","CXCR4",
+     "RORC","IL17A","STAT3","CCR6","FOXP3","IL2RA","CD8A","SELL",
+     "CCR7","CD44","IL7R","CD69","CTLA4","LAG3","PDCD1","TIGIT","HAVCR2",
+     "TOX","CD1C","HLA-DRA","HLA-DPA1","ITGAM","CD68","CXCL10","CCL2",
+     "NOS2","ARG1","CD163","IL10","EPCAM","KRT10","KRT18","KRT8","WT1",
+     "MUC5B","SOX9","SPDEF","LGR5",
+     "PAX8","ESR1","FOXJ1","PAEP","PECAM1","PGR","IGF1","MMP11","FOXO1",
+     "DCN","PDGFRA","THY1","COL1A1","ACTA2","TAGLN","MYL9","FAP","C7","GAS5")
+DotPlot(inte,group.by = "percl_toplabel",features = j)+
+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  theme(axis.text.x = element_text(angle=45,vjust = 1,hjust = 1))
+
+```
+
+## Protein panel
+```{r}
+files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
+files<-files[str_detect(files,"Pro")]
+files<-files[str_detect(files,"UTP",negate=T)]
+xenium.list<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
+
+prote.list<-lapply(xenium.list,function(x) x$`Protein Expression`)
+names(xenium.list)<-str_remove(files,".+sis.")
+names(prote.list)<-str_remove(files,".+sis.")
+
+xenium.list<-lapply(xenium.list,function(x) x$`Gene Expression`)
+xenium.list<-lapply(xenium.list,function(x) CreateSeuratObject(counts = x))
+inte<-merge(xenium.list[[1]],y = xenium.list[names(xenium.list)[-1]],
+            add.cell.ids =names(xenium.list))
+inte<-subset(inte,cells = labels$cell_id)
+temp<-labels%>%filter(cell_id%in%colnames(inte))
+temp<-temp[order(match(temp$cell_id,colnames(inte))),]
+inte<-AddMetaData(inte,metadata = temp%>%column_to_rownames("cell_id"),col.name = "percl_toplabel")
+DotPlot(inte,group.by = "percl_toplabel",features = j)+
+    scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+    theme(axis.text.x = element_text(angle=45,vjust = 1,hjust = 1))
+
+prote.list<-lapply(prote.list,function(x) CreateSeuratObject(counts = x))
+inteP<-merge(prote.list[[1]],y = prote.list[names(prote.list)[-1]],
+            add.cell.ids =names(prote.list))
+inteP<-subset(inteP,cells = labels$cell_id)
+inteP<-AddMetaData(inteP,metadata = temp%>%column_to_rownames("cell_id"),col.name = "percl_toplabel")
+DotPlot(inteP,group.by = "percl_toplabel",features = rownames(inteP))+
+    scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+    theme(axis.text.x = element_text(angle=45,vjust = 1,hjust = 1))

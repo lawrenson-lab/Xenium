@@ -42,26 +42,27 @@ names(coords)<-str_remove(files,".+sis.")
 temp<-coords$`020626_Prime_TMA_Endo_ba1_rerun-TMA-1-Right_TMA`
 temp$cl<-dbscan(coords$`020626_Prime_TMA_Endo_ba1_rerun-TMA-1-Right_TMA`[,2:3],eps = 100)$cluster
 temp<-temp%>%group_by(cl)%>%summarise(max=max(y_centroid),min=min(y_centroid),size=max-min)%>%filter(cl!=0)
-sepd<-min(temp$size)/2
+sepd<-mean(temp$size)
 
 coords<-lapply(names(coords),function(x) coords[[x]]%>%mutate(Section=x))%>%bind_rows()
 #paste all together?  circle will be rotated
 coords<-coords%>%
-  mutate(y_centroid=case_when(str_detect(Section,"TMA-2")~y_centroid+max(y_centroid[str_detect(Section,"TMA-1")])+sepd,
-                              str_detect(Section,"TMA-3")~y_centroid+max(y_centroid[str_detect(Section,"TMA-2")])+11*sepd,
-                              str_detect(Section,"TMA-4")~y_centroid+3*sepd,
-                              str_detect(Section,"TMA-6")~y_centroid+max(y_centroid[str_detect(Section,"TMA-5")])+sepd,
-                              str_detect(Section,"TMA-7")~y_centroid+max(y_centroid[str_detect(Section,"TMA-1")])+5*sepd,
-                              str_detect(Section,"TMA-8")~y_centroid+max(y_centroid[str_detect(Section,"TMA-1")])+7*sepd,
+  mutate(y_centroid=case_when(str_detect(Section,"TMA-2")~y_centroid+max(y_centroid[str_detect(Section,"TMA-1")])+.5*sepd,
+                              str_detect(Section,"TMA-3")~y_centroid+max(y_centroid[str_detect(Section,"TMA-2")])+5*sepd,
+                              str_detect(Section,"TMA-4")~y_centroid+sepd,str_detect(Section,"TMA-5")~y_centroid-sepd,
+                              str_detect(Section,"TMA-6")~y_centroid+max(y_centroid[str_detect(Section,"TMA-5")])-sepd,
+                              str_detect(Section,"TMA-7")~y_centroid+max(y_centroid[str_detect(Section,"TMA-1")])+2*sepd,
+                              str_detect(Section,"TMA-8")~y_centroid+max(y_centroid[str_detect(Section,"TMA-1")])+3*sepd,
                               TRUE~y_centroid),
-         x_centroid=case_when(str_detect(Section,"TMA-3")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-3")])),
-                              str_detect(Section,"TMA-4")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-4")]))+3*sepd,
-                              str_detect(Section,"TMA-5")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-5")]))+7*sepd,
-                              str_detect(Section,"TMA-6")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-6")]))+7*sepd,
-                              str_detect(Section,"TMA-7")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-7")]))+16*sepd,
-                              str_detect(Section,"TMA-8")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-8")]))+20*sepd,
+         x_centroid=case_when(str_detect(Section,"TMA-1")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-1")])),
+                              str_detect(Section,"TMA-2")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-2")])),
+                              str_detect(Section,"TMA-3")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-3")])),
+                              str_detect(Section,"TMA-4")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-4")]))+2*sepd,
+                              str_detect(Section,"TMA-5")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-5")]))+3*sepd,
+                              str_detect(Section,"TMA-6")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-6")]))+4.5*sepd,
+                              str_detect(Section,"TMA-7")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-7")]))+8*sepd,
+                              str_detect(Section,"TMA-8")~abs(x_centroid-max(x_centroid[str_detect(Section,"TMA-8")]))+10*sepd,
                               TRUE~x_centroid))
-
 ###############################################################################################
 #                                   BANKSY
 ###############################################################################################
@@ -73,9 +74,6 @@ coords<-coords%>%filter(cell_id%in%colnames(inte))
 coords<-coords[order(match(coords$cell_id,colnames(inte))),]
 inte<-AddMetaData(inte,metadata = coords)
 
-inte<-ScaleData(inte,features = i)
-inte<-RunPCA(inte)
-inte <- IntegrateLayers(inte, method = HarmonyIntegration, orig.reduction = "pca")
 inte[["RNA"]]<-JoinLayers(inte[["RNA"]])
 inte@assays$RNA$data<-as.matrix(inte@assays$RNA$data)#or banksy will fail
 
@@ -84,12 +82,15 @@ inte <- RunBanksy(inte, lambda = .8, verbose=TRUE, assay = 'RNA',features = "all
                   k_geom = 30,use_agf=T,dimx = "x_centroid",dimy="y_centroid")
 #inte@assays$BANKSY$data%>%t()%>%as.data.frame()%>%rownames_to_column("cell")%>%
 #data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/5Kl0.8_bnksy_mtrx.gz")
-inte <- RunPCA(inte, assay = 'BANKSY',features=rownames(inte),npcs = 30)
-#pcres<-irlba::irlba(A = t(inte@assays$BANKSY$data),nv=30)
-hares<-harmony::RunHarmony(inte@reductions$pca@cell.embeddings,meta_data=inte$orig.ident)
+
+mat<-inte@assays$BANKSY$data
+rm(inte);gc()
+pcres<-irlba::irlba(A = mat,nv=30)
+hares<-harmony::RunHarmony(pcres$u,meta_data=coords$Section)
+rownames(hares)<-rownames(mat)
+colnames(hares)<-paste0("comp",1:30)
 # umap_results <- uwot::umap(hares)
 neighs<-FindNeighbors(hares,k.param = 30)
-clus<-FindClusters(neighs, resolution = 0.5,algorithm = 4)
-temp<-inte@meta.data%>%rownames_to_column("cell")
-temp<-clus%>%rownames_to_column("cell")%>%inner_join(temp)
-temp%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
+clus<-FindClusters(neighs$snn, resolution = 0.5,algorithm = 4)
+coords<-clus%>%rownames_to_column("cell_id")%>%inner_join(coords)
+coords%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")

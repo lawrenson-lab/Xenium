@@ -13,43 +13,8 @@ cols<-c("#E41A1C","#536D9E","#459E6E","#727E76","#B6656D","#F29022","#F781BF","#
         "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#B970A2","#A82676","#655D9B",
         "#8CA77B","#17542A","#94A908","#C8DD34","#8FC9BF","white")
 
-meta<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
-temp<-meta%>%select(x_centroid,y_centroid)%>%dbscan(eps = 100)
-meta$circle<-temp$cluster
-meta<-meta%>%mutate(circle=ifelse(circle==5&y_centroid>6000,500,circle))
-meta<-meta%>%mutate(Core_ID=case_when(circle<4~'1',
-                                      circle%in%c(5,9,10)~'2',#1
-                                      circle%in%c(6,7,500)~'3',#2
-                                      circle%in%c(14:16)~'4',#3
-                                      circle%in%c(12,13,17)~'5',#3
-                                      circle%in%c(4,24,25)~'9',#4
-                                      circle%in%c(21:23)~'7',#4
-                                      circle%in%c(18:20)~'6',#4
-                                      circle%in%c(46,45)~'10',#5
-                                      circle%in%c(54,53,38)~'11',#5
-                                      circle%in%c(37,39,40)~'12',#5
-                                      circle%in%c(34:36)~'13',#5
-                                      circle%in%c(55:57)~'16',#5
-                                      circle%in%c(58:60)~'17',#5
-                                      circle%in%c(48:50)~'18',#5
-                                      circle%in%c(42:44)~'19',#5
-                                      circle%in%c(41,51,52)~'20',#5
-                                      circle%in%c(73,66,63)~'14',#6
-                                      circle%in%c(72,65,64)~'15',#6
-                                      circle%in%c(67:69)~'23',#6
-                                      circle%in%c(71,75,76)~'24',#6
-                                      circle%in%c(85,84,82)~'21',#7
-                                      circle%in%c(81,77,79)~'22',#7
-                                      circle%in%c(94,93,91)~'26',#8
-                                      circle%in%c(90)~'25',#8
-                                      circle%in%c(95,96)~'28',#8
-                                      circle%in%c(89,104)~'29',#8
-                                      circle%in%c(102,100)~'30',#8
-                                      circle%in%c(101,103)~'31',
-                                      TRUE~"discarded"))
-meta<-meta%>%add_count(circle)%>%filter(n>500)
-names(cols)<-sort(unique(meta$Core_ID))
-meta%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=Core_ID))+geom_point(size=.1)+geom_text(data=meta%>%group_by(circle)%>%summarise(x_centroid=median(x_centroid),y_centroid=median(y_centroid)),aes(label=circle),col="black")+guides(col=guide_legend(override.aes = list(size=3)))+scale_color_manual(values=cols)
+meta<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")
+
 ```
 
 ```{r}
