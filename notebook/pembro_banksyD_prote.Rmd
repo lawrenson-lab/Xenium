@@ -7,80 +7,110 @@ library(tidyverse)
 library(Seurat)
 library(dbscan)
 library(clusterProfiler)
+library(limma)
+library(speckle)
 
-cols<-c("#E41A1C","#536D9E","#459E6E","#727E76","#B6656D","#F29022","#F781BF","#C598C9",
+cols<-c("#E41A1C","#536D9E","#459E6E","cornflowerblue","gold","#F29022","#F781BF","#C598C9",
         "#AD6D5E","#7D8285","#4385BF","#204175","#1B9E77","#98D486","#D2C92D","#EFAC4C",
-        "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#B970A2","#A82676","#655D9B",
+        "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#f46d43","#A82676","#655D9B",
         "#8CA77B","#17542A","#94A908","#C8DD34","#8FC9BF","white")
 
 meta<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
-temp<-meta%>%select(x_centroid,y_centroid)%>%dbscan(eps = 100)
-meta$circle<-temp$cluster
-#meta<-meta%>%mutate(circle=ifelse(circle==5&y_centroid>6000,500,circle))
-meta<-meta%>%mutate(Core_ID=case_when(circle%in%c(40:42)~'1',
-                                      circle%in%c(1,38,39)~'2',#1
-                                      circle%in%c(2,6,37)~'3',#1
-                                      circle%in%c(36,14,13)~'4',#1
-                                      circle%in%c(12,8,15)~'5',#1
-                                      circle%in%c(7,29,35)~'10',#1
-                                      circle%in%c(5,34,30)~'9',#1
-                                      circle%in%c(20)~'discarded',#1, 209 cells
-                                      circle%in%c(16:18)~'7',#1
-                                      circle%in%c(9:11)~'6',#1
-                                      circle%in%c(28,27,25)~'11',#1
-                                      circle%in%c(26,24,19)~'12',#1
-                                      circle%in%c(21:23)~'13',#1
-                                      circle%in%c(4,3,44)~'14',#1
-                                      circle%in%c(74,75,69)~'19',#2
-                                      circle%in%c(70,67,66)~'18',#2
-                                      circle%in%c(61,60,54)~'17',#2
-                                      circle%in%c(50,52,53)~'16',#2
-                                      circle%in%c(51,47,49)~'15',#2
-                                      circle%in%c(73,68,71)~'20',#2
-                                      circle%in%c(72,59,58)~'21',#2
-                                      circle%in%c(55:57)~'22',#2
-                                      circle%in%c(62:64)~'23',#2
-                                      circle%in%c(65,48,76)~'24',#2
-                                      circle%in%c(82:84)~'26',#3
-                                      circle%in%c(81)~'25',#3
-                                      circle%in%c(89,85)~'28',#3
-                                      circle%in%c(92,91)~'29',#3
-                                      circle%in%c(80,79)~'30',
-                                      circle%in%c(77,78)~'31',
-                                      TRUE~"discarded"))
+
 meta<-meta%>%add_count(circle)%>%filter(n>500)
 names(cols)<-sort(unique(meta$Core_ID))
-meta%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=Core_ID))+geom_point(size=.1)+
-  geom_text(data=meta%>%group_by(circle)%>%summarise(x_centroid=median(x_centroid),
-                                                     y_centroid=median(y_centroid)),aes(label=circle),col="black")+
-  guides(col=guide_legend(override.aes = list(size=3)))+scale_color_manual(values=cols)
+
+meta%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=as.factor(res.0.5)))+
+  geom_point(size=.1)+
+  geom_text(data=meta%>%group_by(circle,StudyID)%>%
+              summarise(x_centroid=median(x_centroid),y_centroid=median(y_centroid)),
+            aes(label=StudyID),size=2.5,col="black")+
+  scale_color_manual(values=cols)+theme(legend.position = "n")
 ```
 
+# Composition contrast
 ```{r}
-meta<-meta%>%mutate(orig.ident=str_remove(cell_id,"^.+_"))
-i<-meta%>%split(f = meta$Section)%>%lapply(function(x) x$orig.ident)
+annot<-read_tsv("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/PEmbro_TMA_deidentified.tsv")
+meta<-meta%>%mutate(Core_ID=as.numeric(Core_ID))%>%left_join(annot,by=c("Core_ID"="Core ID"))
 
+temp<-meta%>%distinct(circle,res.0.5)%>%count(res.0.5,name = "circles")
+temp<-meta%>%distinct(Core_ID,res.0.5)%>%count(res.0.5,name = "cores")%>%right_join(temp)
+temp<-meta%>%distinct(StudyID,res.0.5)%>%count(res.0.5,name = "studies")%>%right_join(temp)
+temp<-meta%>%count(res.0.5,name = "cells")%>%right_join(temp)
+p0<-temp%>%pivot_longer(-1,names_to = "unit",values_to = "n")%>%
+    ggplot(aes(x=n,y=as.factor(res.0.5),fill=as.factor(res.0.5)))+
+    geom_col()+geom_text(aes(label=n))+
+    facet_grid(~unit,scales="free_x")+
+    scale_fill_manual(values=cols)+theme(legend.position = "n")+scale_x_sqrt()
+
+meta<-meta%>%mutate(Gr=ifelse(responder==T,"responder","non_responder"))
+props<-getTransformedProps(meta$res.0.5,
+                           meta$StudyID)
+ids<-meta%>%distinct(Gr,StudyID)
+designM<-model.matrix(~0+Gr,data=ids)#but Cores are not independent 
+
+props<-props$TransformedProps[,ids$StudyID]
+fit<-lmFit(props,designM)
+cont<-makeContrasts(Grresponder-Grnon_responder,levels = designM)
+fit<-contrasts.fit(fit,cont)
+fit <- eBayes(fit, robust=TRUE)
+res<-topTable(fit,number = nrow(props),coef = 1)
+i<-res%>%filter(abs(logFC)>1)%>%rownames()
+
+p1<-res%>%rownames_to_column("Domain")%>%arrange(logFC)%>%
+  mutate(Domain=factor(Domain,levels=Domain))%>%
+  ggplot(aes(x=logFC,y=Domain,size=P.Value,col=logFC))+geom_point()+
+  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  scale_size(range = c(5,1),trans="log10")+theme_minimal()+
+  ggtitle("Responde - non-responder, proportions by StudyID")
+
+temp<-meta%>%count(res.0.5,responder)%>%mutate(res.0.5=factor(res.0.5))
+temp<-temp%>%group_by(responder)%>%summarise(n=sum(n),res.0.5="Total")%>%bind_rows(temp)
+p2<-temp%>%mutate(res.0.5=factor(res.0.5,levels=c(levels(p1$data$Domain),"Total")))%>%
+  ggplot(aes(x=n,y=res.0.5,fill=responder))+
+  geom_bar(stat="identity",position="fill")+
+  geom_vline(xintercept = .5)+labs(x="Cell prop")
+
+```
+
+# Cell type markers
+```{r}
 files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
 files<-files[str_detect(files,"Pro")]
 files<-files[str_detect(files,"UTP",negate=T)]
 xenium.list<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
-prote.list<-lapply(xenium.list,function(x) x$`Protein Expression`)
 names(xenium.list)<-str_remove(files,".+sis.")
-names(prote.list)<-str_remove(files,".+sis.")
 
-prote.list<-lapply(prote.list,function(x) CreateSeuratObject(counts = x))
-prote.list<-lapply(names(i),function(x) 
-  subset(prote.list[[x]],cells=i[[x]]))
-names(prote.list)<-names(i)
-
-inte<-merge(prote.list[[1]],y = prote.list[names(prote.list)[-1]],
-            add.cell.ids =names(prote.list))
-meta<-meta[order(match(meta$cell_id,colnames(inte))),]
+inte<-lapply(xenium.list, CreateSeuratObject)
+inte<-merge(inte[[1]],y = inte[names(inte)[-1]],
+            add.cell.ids =names(inte))
+inte<-NormalizeData(inte)
+inte<-subset(inte,cells=meta$cell_id)
 inte<-AddMetaData(inte,metadata = meta%>%column_to_rownames("cell_id"))
-rm(prote.list)
+
+j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
+     "CD27","CD38","BCL6","CXCR5","MME","JCHAIN","PRDM1","SDC1",
+     "IGHA1","IGHG1","IGHG2","IGHG3","IGHG4","IGHM","NCAM1","FCGR3A",
+     "CD3D","TRDC","TRGC1","TRGC2","CD4","IL4","GATA3","CCR4","CXCR4",
+     "RORC","IL17A","STAT3","CCR6","FOXP3","IL2RA","CD8A","SELL",
+     "CCR7","CD44","IL7R","CD69","CTLA4","LAG3","PDCD1","TIGIT","HAVCR2",
+     "TOX","CD1C","HLA-DRA","HLA-DPA1","ITGAM","CD68","CXCL10","CCL2",
+     "NOS2","ARG1","CD163","IL10","EPCAM","KRT10","KRT18","KRT8","WT1",
+     "MUC5B","SOX9","SPDEF","LGR5",
+     "PAX8","ESR1","FOXJ1","PAEP","PECAM1","PGR","IGF1","MMP11","FOXO1",
+     "DCN","PDGFRA","THY1","COL1A1","ACTA2","TAGLN","MYL9","FAP","C7","GAS5")
+DotPlot(subset(inte,subset = res.0.5%in%i),features = j,group.by = "res.0.5")+
+  RotatedAxis()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  theme(axis.text.x = element_text(size=8))
+k<-tail(rownames(inte),20)
+DotPlot(subset(inte,subset = res.0.5%in%i),features = k,group.by = "res.0.5")+
+  coord_flip()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  theme(axis.text.x = element_text(size=8))
+
 
 ```
 
+# Domain markers
 ```{r}
 #meta%>%count(Core_ID,res0.5)%>%mutate(Core_ID=factor(Core_ID,levels=sort(as.numeric(unique(meta$Core_ID)))))%>%ggplot(aes(y=Core_ID,x=n,fill=as.factor(res0.5)))+geom_col(stat="identity",position = "fill")+scale_fill_manual(values=cols)+labs(x="Prop")+theme(legend.position = "n")
 p0<-meta%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=as.factor(res.0.5)))+
@@ -100,17 +130,6 @@ p2<-DotPlot(inte,group.by = "res.0.5",features = rownames(inte))+
   coord_flip()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")
 
 
-j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
-     "CD27","CD38","BCL6","CXCR5","MME","JCHAIN","PRDM1","SDC1",
-     "IGHA1","IGHG1","IGHG2","IGHG3","IGHG4","IGHM","NCAM1","FCGR3A",
-     "CD3D","TRDC","TRGC1","TRGC2","CD4","IL4","GATA3","CCR4","CXCR4",
-     "RORC","IL17A","STAT3","CCR6","FOXP3","IL2RA","CD8A","SELL",
-     "CCR7","CD44","IL7R","CD69","CTLA4","LAG3","PDCD1","TIGIT","HAVCR2",
-     "TOX","CD1C","HLA-DRA","HLA-DPA1","ITGAM","CD68","CXCL10","CCL2",
-     "NOS2","ARG1","CD163","IL10","EPCAM","KRT10","KRT18","KRT8","WT1",
-     "MUC5B","SOX9","SPDEF","LGR5",
-     "PAX8","ESR1","FOXJ1","PAEP","PECAM1","PGR","IGF1","MMP11","FOXO1",
-     "DCN","PDGFRA","THY1","COL1A1","ACTA2","TAGLN","MYL9","FAP","C7","GAS5")
 p3<-domDEG%>%filter(gene%in%unique(c(i,j)))%>%
   mutate(cluster=factor(cluster,levels=1:20))%>%
   ggplot(aes(x=as.factor(cluster),y=gene,

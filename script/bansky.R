@@ -23,8 +23,8 @@ j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
 
 slide<- commandArgs(trailingOnly=TRUE)
 #slide<-"/media/Xenium_On_NAS/xenium_reanalysis/042825_Batch4Endometrioma_Rerun-EDV013-Left_EDV002_EDV010_EDV013/outs/"
-transcripts <- arrow::read_parquet(paste0(slide,"transcripts.parquet"))
-coords<-data.table::fread(paste0(slide,"cells.csv.gz"))
+transcripts <- arrow::read_parquet(paste0(slide,"/transcripts.parquet"))
+coords<-data.table::fread(paste0(slide,"/cells.csv.gz"))
 slide<-str_remove_all(slide,".+sis.|.ou.+")
 print(paste("Loaded",slide)) 
 
@@ -41,7 +41,10 @@ sc<-CreateSeuratObject(counts = mat)
 rm(transcripts);gc()
 
 qced<-data.table::fread(paste0("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/Banksy_matrix/",
-                               slide,"l0.8_bnksy_mtrx.gz"))#change for domains
+                               slide,"l0.8_bnksy_mtrx.gz"))#comment for 5k panel
+#uncomment for 5k panel
+#qced<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")#for 5k panel
+#qced<-qced%>%filter(Section==slide)%>%mutate(cell=str_remove(cell_id,slide)%>%str_remove("_"))#for 5k panel
 sc<-subset(sc,cells = qced$cell)
 rm(mat,qced);gc()
 

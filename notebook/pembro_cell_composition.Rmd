@@ -9,11 +9,10 @@ library(tidyverse)
 library(dbscan)
 library(speckle)
 library(limma)
-cols<-c("#E41A1C","#536D9E","#459E6E","#727E76","#B6656D","#F29022","#F781BF","#C598C9",
+cols<-c("#E41A1C","#536D9E","#459E6E","cornflowerblue","gold","#F29022","#F781BF","#C598C9",
         "#AD6D5E","#7D8285","#4385BF","#204175","#1B9E77","#98D486","#D2C92D","#EFAC4C",
-        "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#B970A2","#A82676","#655D9B",
+        "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#f46d43","#A82676","#655D9B",
         "#8CA77B","#17542A","#94A908","#C8DD34","#8FC9BF","white")
-
 files<-list.files("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro",full.names = T)
 files<-files[str_detect(files,"labels.gz")]
 files<-files[str_detect(files,"UTP",negate = T)]
@@ -79,27 +78,27 @@ coords5k<-coords5k%>%mutate(Core_ID=case_when(circle<4~'1',
                                       circle%in%c(23:25)~'9',#4
                                       circle%in%c(20:22)~'7',#4
                                       circle%in%c(17:19)~'6',#4
-                                      circle%in%c(46,45)~'10',#5
-                                      circle%in%c(54,53,38)~'11',#5
-                                      circle%in%c(37,39,40)~'12',#5
-                                      circle%in%c(34:36)~'13',#5
-                                      circle%in%c(55:57)~'16',#5
-                                      circle%in%c(58:60)~'17',#5
-                                      circle%in%c(48:50)~'18',#5
-                                      circle%in%c(42:44)~'19',#5
-                                      circle%in%c(41,51,52)~'20',#5
-                                      circle%in%c(73,66,63)~'14',#6
-                                      circle%in%c(72,65,64)~'15',#6
-                                      circle%in%c(67:69)~'23',#6
-                                      circle%in%c(71,75,76)~'24',#6
-                                      circle%in%c(85,84,82)~'21',#7
-                                      circle%in%c(81,77,79)~'22',#7
-                                      circle%in%c(94,93,91)~'26',#8
-                                      circle%in%c(90)~'25',#8
-                                      circle%in%c(95,96)~'28',#8
-                                      circle%in%c(89,104)~'29',#8
-                                      circle%in%c(102,100)~'30',#8
-                                      circle%in%c(101,103)~'31',
+                                      circle%in%c(43,44)~'10',#5
+                                      circle%in%c(52,51,36)~'11',#5
+                                      circle%in%c(37,35,38)~'12',#5
+                                      circle%in%c(32:34)~'13',#5
+                                      circle%in%c(53:55)~'16',#5
+                                      circle%in%c(56:58)~'17',#5
+                                      circle%in%c(46:48)~'18',#5
+                                      circle%in%c(40:42)~'19',#5
+                                      circle%in%c(39,49,50)~'20',#5
+                                      circle%in%c(70,60,63)~'14',#6
+                                      circle%in%c(69,62,61)~'15',#6
+                                      circle%in%c(64:66)~'23',#6
+                                      circle%in%c(72,73,68)~'24',#6
+                                      circle%in%c(79,81,82)~'21',#7
+                                      circle%in%c(78,76,74)~'22',#7
+                                      circle%in%c(91,90,88)~'26',#8
+                                      circle%in%c(87)~'25',#8
+                                      circle%in%c(93,92)~'28',#8
+                                      circle%in%c(86,101)~'29',#8
+                                      circle%in%c(99,97)~'30',#8
+                                      circle%in%c(100,98)~'31',
                                       TRUE~"discarded"))
 
 coords<-coords%>%mutate(panel="Protein")
@@ -111,7 +110,7 @@ coords<-coords5k%>%mutate(panel="5k")%>%bind_rows(coords)
 
 # Plot
 ```{r}
-cols<-c("#D8227D","#536D9E","#459E6E","#EFAC4C","#F781BF","#C598C9",
+cols<-c("#F29022","#536D9E","#459E6E","gray","#F781BF","#C598C9",
         "#4385BF","#18ABB8","#910241","#E41A1C","#8FC9BF","white")
 names(cols)<-unique(labels$percl_toplabel)
 
