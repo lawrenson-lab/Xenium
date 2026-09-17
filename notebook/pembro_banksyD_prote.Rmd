@@ -112,45 +112,47 @@ DotPlot(subset(inte,subset = res.0.5%in%i),features = k,group.by = "res.0.5")+
 
 # Domain markers
 ```{r}
-#meta%>%count(Core_ID,res0.5)%>%mutate(Core_ID=factor(Core_ID,levels=sort(as.numeric(unique(meta$Core_ID)))))%>%ggplot(aes(y=Core_ID,x=n,fill=as.factor(res0.5)))+geom_col(stat="identity",position = "fill")+scale_fill_manual(values=cols)+labs(x="Prop")+theme(legend.position = "n")
-p0<-meta%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=as.factor(res.0.5)))+
-  geom_point(size=.1)+scale_color_manual(values=cols)+theme(legend.position = 'n')
-p1<-meta%>%distinct(Core_ID,res.0.5)%>%count(res.0.5)%>%
-  ggplot(aes(x=n,y=as.factor(res.0.5),fill=as.factor(res.0.5)))+
-  geom_col()+geom_text(aes(x=n+1,label=n))+
-  scale_fill_manual(values=cols)+theme(legend.position = "n")+
-  labs(x="Cores",y="Domain")
+inte<-lapply(xenium.list,function(x) x$`Gene Expression`)
+inte<-lapply(inte, CreateSeuratObject)
+inte<-merge(inte[[1]],y = inte[names(inte)[-1]],
+            add.cell.ids =names(inte))
+inte<-AddMetaData(inte,metadata = meta%>%column_to_rownames("cell_id"))
+inte<-NormalizeData(inte)
+inte[["RNA"]]<-JoinLayers(inte)
 
+pb<-AggregateExpression(inte,group.by = c("Gr","Core_ID","res.0.5"),return.seurat = T)
+domDEG<-FindAllMarkers(pb,group.by = "res.0.5",#latent.vars = "StudyID",
+                       test.use = "DESeq2",min.cells.group = 2)
+k<-domDEG%>%filter(p_val_adj<0.05&avg_log2FC>log2(1.5)&!gene%in%j&cluster%in%i)%>%
+  distinct(gene)%>%unlist()
+domDEG%>%filter(gene%in%k&cluster%in%i)%>%
+  mutate(cluster=factor(cluster,levels=1:19))%>%
+  ggplot(aes(x=cluster,y=gene,col=avg_log2FC,size=p_val_adj))+
+  geom_point()+
+  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  scale_size(range = c(5,1),trans="sqrt",breaks = c(1e-23,1e-13,1e-3,1))+
+  theme_minimal()
 
-#pb<-AggregateExpression(inte,group.by = c("Core_ID","res.0.5"),return.seurat = T)
-#pb<-subset(pb,subset = res.0.5!=18)# found once
-#domDEG<-FindAllMarkers(pb,group.by = "res.0.5",min.pct = 0,min.cells.group = 1)# LR?
-#NOT working for protein
-p2<-DotPlot(inte,group.by = "res.0.5",features = rownames(inte))+
-  coord_flip()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")
-
-
-p3<-domDEG%>%filter(gene%in%unique(c(i,j)))%>%
-  mutate(cluster=factor(cluster,levels=1:20))%>%
-  ggplot(aes(x=as.factor(cluster),y=gene,
-             colour = avg_log2FC,size = p_val_adj))+geom_point()+
-  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b",
-                        oob = scales::squish,limits=c(-4,4))+
-  scale_size(range = c(5,1),breaks = c(1e-8,1e-5,1e-2,1))+
-  theme_minimal()+labs(x="Domain",col="LFC",size="Padj")
-
-i<-domDEG%>%filter(avg_log2FC>0&p_val_adj<0.05)
-i<-i%>%split(f = i$cluster)%>%lapply(function(x) x$gene)
-i<-i[sapply(i,length)>1]
-orares<-lapply(i,function(x) 
+genes<-domDEG%>%filter(p_val_adj<0.05&avg_log2FC>log2(1.5)&cluster%in%i)
+genes<-genes%>%split(f = genes$cluster)%>%lapply(function(x) x$gene)
+genes<-genes[sapply(genes,length)>1]
+orares<-lapply(genes,function(x) 
   enrichGO(x,OrgDb = "org.Hs.eg.db",keyType = "SYMBOL",ont = "BP"))
 orares<-lapply(orares,simplify)
 orares<-lapply(names(orares),function(x) 
   as.data.frame(orares[[x]])%>%mutate(cluster=x))%>%bind_rows()
-i<-orares%>%filter(Count>4)%>%group_by(cluster)%>%
-  slice_max(Count,n=2)%>%ungroup()%>%distinct(Description)%>%unlist()
-p2<-orares%>%filter(Description%in%i)%>%
+k<-orares%>%filter(Count>1)%>%group_by(cluster)%>%
+    slice_max(Count,n=2)%>%distinct(Description)%>%unlist()
+orares%>%filter(Description%in%k)%>%
   ggplot(aes(x=cluster,y=Description,col=FoldEnrichment,size=p.adjust))+
   geom_point()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b",
                                      oob = scales::squish,limits=c(0,20))+
   scale_size(range = c(5,1),trans="log10")+theme_minimal()+labs(x="Domain")
+
+```
+
+# Group markers per domain
+```{r}
+d1<-subset(pb,subset = res.0.5==1)
+d1DEG<-FindAllMarkers(pb,group.by = "Gr",#latent.vars = "StudyID",
+                       test.use = "DESeq2",min.cells.group = 2)
