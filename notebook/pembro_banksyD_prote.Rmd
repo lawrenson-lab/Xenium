@@ -117,8 +117,10 @@ inte<-lapply(inte, CreateSeuratObject)
 inte<-merge(inte[[1]],y = inte[names(inte)[-1]],
             add.cell.ids =names(inte))
 inte<-AddMetaData(inte,metadata = meta%>%column_to_rownames("cell_id"))
+i<-rownames(inte)
+i<-i[str_detect(i,"fung|bact",negate = T)]
+inte<-subset(inte,features=i)
 inte<-NormalizeData(inte)
-inte[["RNA"]]<-JoinLayers(inte)
 
 pb<-AggregateExpression(inte,group.by = c("Gr","Core_ID","res.0.5"),return.seurat = T)
 domDEG<-FindAllMarkers(pb,group.by = "res.0.5",#latent.vars = "StudyID",
@@ -148,11 +150,41 @@ orares%>%filter(Description%in%k)%>%
   geom_point()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b",
                                      oob = scales::squish,limits=c(0,20))+
   scale_size(range = c(5,1),trans="log10")+theme_minimal()+labs(x="Domain")
-
 ```
 
-# Group markers per domain
+# Cluster domains across panels
 ```{r}
-d1<-subset(pb,subset = res.0.5==1)
-d1DEG<-FindAllMarkers(pb,group.by = "Gr",#latent.vars = "StudyID",
-                       test.use = "DESeq2",min.cells.group = 2)
+pb<-AggregateExpression(inte,group.by = c("res.0.5"),return.seurat = T)
+mat<-pb@assays$RNA$scale.data
+
+dom5k<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")
+dom5k<-dom5k%>%add_count(circle)%>%filter(n>500)
+files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
+files<-files[str_detect(files,"TMA")]
+files<-files[str_detect(files,"UTP|Pro",negate=T)]
+xenium.listA<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
+names(xenium.listA)<-str_remove(files,".+sis.")
+inte5k<-lapply(xenium.listA,function(x) x$`Gene Expression`)
+inte5k<-lapply(inte5k, CreateSeuratObject)
+inte5k<-merge(inte5k[[1]],y = inte5k[names(inte5k)[-1]],
+            add.cell.ids =names(inte5k))
+inte5k<-subset(inte5k,cells=dom5k$cell_id)
+inte5k<-AddMetaData(inte5k,metadata = dom5k%>%column_to_rownames("cell_id"))
+inte5k<-NormalizeData(inte5k)
+pb<-AggregateExpression(inte5k,group.by = c("res.0.5"),return.seurat = T)
+mat5k<-pb@assays$RNA$scale.data
+
+i<-rownames(mat5k)
+i<-i[i%in%rownames(mat)]
+colnames(mat5k)<-paste0("5k_",colnames(mat5k))
+temp<-cor(concate,method = "spearman")
+temp<-temp[str_detect(rownames(temp),"target"),str_detect(rownames(temp),"5k")]
+matches<-rownames(temp)[apply(temp,2,which.max)]
+matches[apply(temp,2,max)<0.5]<-"no"
+
+Heatmap(t(concate),name="z_aggr",column_names_gp = gpar(fontsize=6),
+        left_annotation = rowAnnotation(panel=ifelse(str_detect(colnames(concate),"5k"),
+                                                     "5k","targeted"),
+                                        gr=c(colnames(concate)[1:19],matches),
+                          col=list(gr=cols,panel=c("5k"="#C8DD34","targeted"="gold"))),
+        row_split = c(colnames(concate)[1:19],matches),row_title = NULL)
