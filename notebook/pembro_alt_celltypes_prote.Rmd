@@ -7,6 +7,7 @@ library(tidyverse)
 library(Seurat)
 library(Banksy)
 library(SeuratWrappers)
+library(SingleR)
 cols<-c("#E41A1C","#536D9E","#459E6E","cornflowerblue","gold","#F29022","#F781BF","#C598C9",
         "#AD6D5E","#7D8285","#4385BF","#204175","#1B9E77","#98D486","#D2C92D","#EFAC4C",
         "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#f46d43","#A82676","#655D9B",
@@ -96,16 +97,77 @@ inte<-ScaleData(inte)
 #inte<-IntegrateLayers(inte,method = HarmonyIntegration,features = i)
 inte<-JoinLayers(inte)
 
-i<-inteP@meta.data%>%filter(ct%in%c(13:18))%>%rownames()
-subg<-subset(inte,cells = rownames(i))
-expre<-subg@assays$RNA$scale.data
-expre <- neighs$snn[rownames(i),rownames(i)] %*% t(expre)
+set.seed(1000) 
+inte@assays$RNA$data<-as.matrix(inte@assays$RNA$data)
+inte <- RunBanksy(inte, lambda = .2, verbose=TRUE, 
+                assay = 'RNA',features = "all",
+                use_agf=T,dimx = "x_centroid",dimy = "y_centroid")
+mat<-inte@assays$BANKSY$data
+mat%>%t()%>%as.data.frame()%>%rownames_to_column("cell")%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/GE_l0.2_bnksy_mtrx.gz")
 
-pcres<-irlba::irlba(A = expre,nv=50)
-hares<-harmony::RunHarmony(pcres$u,meta_data=meta$circle)
-rownames(hares)<-rownames(expre)
-colnames(hares)<-paste0("pc",1:50)
-neighsE<-FindNeighbors(hares,k.param = 50)
-clus<-FindClusters(neighsE$snn,initial.membership = inteP$ct,resolution = .1,method = 4)
-inte@meta.data$cl<-clus$res.0.1
+protecl<-inteP@meta.data%>%rownames_to_column("cell")%>%select(cell,ct_res0.05,ct)
+i<-protecl%>%filter(ct%in%c(11,13:18))%>%distinct(cell)%>%unlist()
+pcres<-irlba::irlba(A = t(mat[,i]),nv=10)
+hares<-harmony::RunHarmony(pcres$u,meta_data=meta$circle[meta$cell_id%in%i])
+rownames(hares)<-i
+colnames(hares)<-paste0("pc",1:10)
+neighsE<-FindNeighbors(hares,k.param = 30)
+immune_clus<-FindClusters(neighsE$snn,
+                          initial.membership = protecl$ct[protecl$cell%in%i],
+                          resolution = .8,method = 4)
+
+i<-protecl%>%filter(ct==12)%>%distinct(cell)%>%unlist()
+pcres<-irlba::irlba(A = t(mat[,i]),nv=10)
+hares<-harmony::RunHarmony(pcres$u,meta_data=meta$circle[meta$cell_id%in%i])
+rownames(hares)<-i
+colnames(hares)<-paste0("pc",1:10)
+neighsE<-FindNeighbors(hares,k.param = 30)
+mesen_clus<-FindClusters(neighsE$snn,
+                          initial.membership = protecl$ct[protecl$cell%in%i],
+                          resolution = .1,method = 4)
+
+temp<-immune_clus%>%rownames_to_column("cell")%>%
+  mutate(ct=paste0("immune_",res.0.8))%>%select(cell,ct)
+temp<-mesen_clus%>%rownames_to_column("cell")%>%
+  mutate(ct=paste0("mesenchymal_",res.0.1))%>%select(cell,ct)%>%bind_rows(temp)
+temp<-protecl%>%filter(!cell%in%temp$cell)%>%
+  mutate(ct=paste0("protein_",ct))%>%select(cell,ct)%>%bind_rows(temp)
+temp<-temp[order(match(temp$cell,colnames(inte))),]
+inte@meta.data$ct<-temp$ct
 ```
+
+# SingleR
+```{r}
+bulkref<-readRDS("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/bulkref.RDS")
+bulkref<-subset(bulkref,subset=label!="Erythrocytes")
+bulkref@meta.data<-bulkref@meta.data%>%
+  mutate(sublabel=str_remove_all(label," \\(.+|Early ")%>%
+           str_replace("emmo","emo"))%>%
+  mutate(sublabel=case_when(str_detect(label,
+                                       "EnEp|MUC5B|SOX9|IHH|Cili|Gland|KRT|Meso")~"Epithelial",
+                            str_detect(label,"EnS")~"Mesenchymal cells",
+                            str_detect(label,"Th")~"CD4 T-cells",
+                            TRUE~sublabel))
+
+bulkquery<-AggregateExpression(inte,group.by = "ct",
+                               return.seurat = T,features = rownames(bulkref))
+bulkquery<-ScaleData(bulkquery,assay = "RNA",features = rownames(inte))
+res <- SingleR(test=bulkquery@assays$RNA$scale.data,#this
+               ref=bulkref@assays$SCT$data, 
+               labels=bulkref@meta.data$sublabel, method = "cosine",
+               quantile = 0.999,tune.thresh = .1)
+res<-as.data.frame(res)%>%rownames_to_column("ct")
+res<-res%>%mutate(pruned.labels=str_replace_na(pruned.labels,"unknown"))
+temp<-res%>%mutate(ct=str_replace(ct,"-","_"))%>%select(ct,pruned.labels)%>%right_join(temp)
+temp<-temp[order(match(temp$cell,colnames(inte))),]
+inte<-AddMetaData(inte,metadata = temp,col.name = "pruned.labels")
+inte@meta.data<-inte@meta.data%>%mutate(temp=paste(ct,':',pruned.labels))
+temp%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/prote_l0.2_labels.gz")
+```
+
+```{r}
+cellcols<-c(Epithelial="#F29022","CD4 T-cells"="#18ABB8","Smooth muscle cells"="#AD6D5E",
+            "B-cells"="#C8DD34","Macrophages M1"="#F781BF","Macrophages M2"="#F47494",
+        "C7-Fibro"="#204175","C7-Activated-Fibro"="#536D9E","Fibro"="#4385BF",
+        "Endothelial cells"="#E41A1C","Effector CD8 T-cells"="#8FC9BF",
+        "Plasmablast/Plasma cells"="gold","Gamma-Delta T-cells" ="#910241")
