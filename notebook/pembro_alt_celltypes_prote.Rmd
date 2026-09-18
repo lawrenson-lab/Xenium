@@ -1,0 +1,111 @@
+---
+  title: "domains"
+---
+  
+```{r}
+library(tidyverse)
+library(Seurat)
+library(Banksy)
+library(SeuratWrappers)
+cols<-c("#E41A1C","#536D9E","#459E6E","cornflowerblue","gold","#F29022","#F781BF","#C598C9",
+        "#AD6D5E","#7D8285","#4385BF","#204175","#1B9E77","#98D486","#D2C92D","#EFAC4C",
+        "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#f46d43","#A82676","#655D9B",
+        "#8CA77B","#17542A","#94A908","#C8DD34","#8FC9BF","white")
+
+meta<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
+meta<-meta%>%add_count(circle)%>%filter(n>500)
+temp<-read_tsv("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/PEmbro_TMA_deidentified.tsv")
+meta<-meta%>%mutate(Core_ID=as.numeric(Core_ID))%>%left_join(temp,by=c("Core_ID"="Core ID"))
+```
+
+# Main cell type
+```{r}
+files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
+files<-files[str_detect(files,"Pro")]
+files<-files[str_detect(files,"UTP",negate=T)]
+xenium.list<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
+names(xenium.list)<-str_remove(files,".+sis.")
+
+prote.list<-lapply(xenium.list,function(x) x$`Protein Expression`)
+inteP<-lapply(prote.list, CreateSeuratObject)
+inteP<-merge(inteP[[1]],y = inteP[names(inteP)[-1]],
+            add.cell.ids =names(inteP))
+inteP<-subset(inteP,cells=meta$cell_id)
+#sum(colnames(inteP)==rownames(clus))
+inteP<-AddMetaData(inteP,metadata = meta%>%column_to_rownames("cell_id"))
+inteP<-NormalizeData(inteP)
+inteP<-ScaleData(inteP)
+#inteP<-RunPCA(inteP,features = rownames(inteP)) not needed for Banksy
+#inteP<-IntegrateLayers(inteP,method = HarmonyIntegration,features = rownames(inteP)) #not needed for Banksy
+inteP<-JoinLayers(inteP)
+
+set.seed(1000) 
+inteP@assays$RNA$data<-as.matrix(inteP@assays$RNA$data)
+inteP <- RunBanksy(inteP, lambda = .2, verbose=TRUE, 
+                assay = 'RNA',features = "all",
+                use_agf=T,dimx = "x_centroid",dimy = "y_centroid")
+mat<-inteP@assays$BANKSY$data
+mat%>%t()%>%as.data.frame()%>%rownames_to_column("cell")%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/prote_l0.2_bnksy_mtrx.gz")
+pcres<-irlba::irlba(A = t(mat),nv=50)
+hares<-harmony::RunHarmony(pcres$u,meta_data=meta$circle)
+
+rownames(hares)<-colnames(mat)
+colnames(hares)<-paste0("pc",1:50)
+neighs<-FindNeighbors(hares,k.param = 50)
+clus<-FindClusters(neighs$snn, resolution = 0.05,algorithm = 4)
+inteP@meta.data$ct_res0.05<-clus$res.0.05
+p0<-DotPlot(inteP,group.by = "ct_res0.05",features = rownames(inteP))+
+  coord_flip()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")
+
+i<-inteP@meta.data%>%filter(ct_res0.05%in%c(2,3))%>%rownames()
+subn<-neighs$snn[i,i]
+clus<-FindClusters(subn, resolution = 0.1,algorithm = 4)
+temp<-inteP@meta.data%>%rownames_to_column("cell")%>%select(cell,ct_res0.05)
+temp<-clus%>%rownames_to_column("cell")%>%
+  mutate(ct_subres0.1=res.0.1)%>%
+  select(cell,ct_subres0.1)%>%right_join(temp)
+temp<-temp%>%mutate(ct=ifelse(cell%in%i,10+as.numeric(ct_subres0.1),ct_res0.05))
+temp<-temp[order(match(temp$cell,colnames(inteP))),]
+tem%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/prote_l0.2_cls.gz")
+inteP<-AddMetaData(inteP,metadata = temp,col.name = "ct")
+p1<-DotPlot(inteP,group.by = "ct",features = rownames(inteP))+
+    coord_flip()+scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")
+
+umap_results <- uwot::umap(hares)
+umap_results<-as.data.frame(umap_results)
+colnames(umap_results)<-c("UMAP1","UMAP2")
+umap_results$ct<-temp$ct
+p2<-umap_results%>%ggplot(aes(x=UMAP1,y=UMAP2,col=ct))+geom_point(size=.1)+
+  guides(col=guide_legend(override.aes = list(size=3)))
+```
+
+# Subtypes
+```{r}
+gene.list<-lapply(xenium.list,function(x) x$`Gene Expression`)
+inte<-lapply(gene.list, CreateSeuratObject)
+inte<-merge(inte[[1]],y = inte[names(inte)[-1]],
+            add.cell.ids =names(inte))
+inte<-subset(inte,cells=meta$cell_id)
+#sum(colnames(inteP)==rownames(clus))
+inte<-AddMetaData(inte,metadata = meta%>%column_to_rownames("cell_id"))
+inte<-NormalizeData(inte)
+i<-rownames(inte)
+i<-i[str_detect(i,"bact|fung",negate = T)]
+inte<-subset(inte,features = i)
+inte<-ScaleData(inte)
+#inte<-IntegrateLayers(inte,method = HarmonyIntegration,features = i)
+inte<-JoinLayers(inte)
+
+i<-inteP@meta.data%>%filter(ct%in%c(13:18))%>%rownames()
+subg<-subset(inte,cells = rownames(i))
+expre<-subg@assays$RNA$scale.data
+expre <- neighs$snn[rownames(i),rownames(i)] %*% t(expre)
+
+pcres<-irlba::irlba(A = expre,nv=50)
+hares<-harmony::RunHarmony(pcres$u,meta_data=meta$circle)
+rownames(hares)<-rownames(expre)
+colnames(hares)<-paste0("pc",1:50)
+neighsE<-FindNeighbors(hares,k.param = 50)
+clus<-FindClusters(neighsE$snn,initial.membership = inteP$ct,resolution = .1,method = 4)
+inte@meta.data$cl<-clus$res.0.1
+```
