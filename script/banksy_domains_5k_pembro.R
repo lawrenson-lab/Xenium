@@ -66,6 +66,11 @@ coords<-coords%>%
 ###############################################################################################
 #                                   BANKSY
 ###############################################################################################
+#targeted_mat<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/022426_TMA-Endo_GE-Pro_Ba1-TMA-1-Right_TMAl0.8_bnksy_mtrx.gz")
+#i<-colnames(targeted_mat)
+#j<-rownames(xenium.list$`020626_Prime_TMA_Endo_ba1_rerun-TMA-1-Right_TMA`)
+#i<-intersect(i,j)
+
 xenium.list<-lapply(xenium.list,subset,features=i)
 inte<-merge(xenium.list[[1]],y = xenium.list[names(xenium.list)[-1]],
             add.cell.ids =names(xenium.list))
@@ -80,8 +85,8 @@ inte@assays$RNA$data<-as.matrix(inte@assays$RNA$data)#or banksy will fail
 set.seed(1000)
 inte <- RunBanksy(inte, lambda = .8, verbose=TRUE, assay = 'RNA',features = "all",
                   k_geom = 30,use_agf=T,dimx = "x_centroid",dimy="y_centroid")
-#inte@assays$BANKSY$data%>%t()%>%as.data.frame()%>%rownames_to_column("cell")%>%
-#data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/5Kl0.8_bnksy_mtrx.gz")
+inte@assays$BANKSY$data%>%t()%>%as.data.frame()%>%rownames_to_column("cell")%>%
+  data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/5Kl0.8_bnksy_mtrx.gz")
 
 mat<-inte@assays$BANKSY$data
 rm(inte);gc()
@@ -89,7 +94,7 @@ pcres<-irlba::irlba(A = mat,nv=30)
 hares<-harmony::RunHarmony(pcres$u,meta_data=coords$Section)
 rownames(hares)<-rownames(mat)
 colnames(hares)<-paste0("comp",1:30)
-# umap_results <- uwot::umap(hares)
+ umap_results <- uwot::umap(hares)
 neighs<-FindNeighbors(hares,k.param = 30)
 clus<-FindClusters(neighs$snn, resolution = 0.5,algorithm = 4)
 coords<-clus%>%rownames_to_column("cell_id")%>%inner_join(coords)
