@@ -171,3 +171,86 @@ cellcols<-c(Epithelial="#F29022","CD4 T-cells"="#18ABB8","Smooth muscle cells"="
         "C7-Fibro"="#204175","C7-Activated-Fibro"="#536D9E","Fibro"="#4385BF",
         "Endothelial cells"="#E41A1C","Effector CD8 T-cells"="#8FC9BF",
         "Plasmablast/Plasma cells"="gold","Gamma-Delta T-cells" ="#910241")
+```
+
+# Subcluster flagged groups > 100 cells
+```{r}
+temp<-inte@meta.data%>%dplyr::count(pruned.labels)%>%arrange(n)
+i<-temp%>%filter(n>100&str_detect(pruned.labels,"Eff|^Fib|Gamm|Mac"))%>%
+  distinct(pruned.labels)%>%unlist()
+tofix<-lapply(i,function(x) subset(inte,subset = pruned.labels==x))
+names(tofix)<-i
+
+tofix<-lapply(tofix,function(x) RunPCA(x,npcs=10,features=rownames(inte)))
+tofix<-lapply(tofix,function(x) harmony::RunHarmony(x,group.by.vars="Section"))
+tofix<-lapply(tofix,function(x) RunUMAP(x,reduction = "harmony",dims=1:10))
+tofix<-lapply(tofix,function(x) FindNeighbors(x,k.param = 15,reduction = "harmony"))
+tofix<-lapply(tofix,function(x) FindClusters(x,algorithm=4,resolution=.1))
+res <- lapply(tofix,function(x)
+  SingleR(test=x@assays$RNA$scale.data,#this
+          clusters=x$seurat_clusters,
+          ref=bulkref@assays$SCT$data, 
+          labels=bulkref@meta.data$sublabel, method = "cosine",
+               quantile = 0.999,tune.thresh = .1))
+res<-lapply(res,as.data.frame)
+res<-lapply(names(res),function(x) 
+  res[[x]]%>%rownames_to_column("seurat_clusters")%>%
+    mutate(newlabel=pruned.labels,
+           pruned.labels=x)%>%
+    select(seurat_clusters,newlabel,pruned.labels))%>%bind_rows()
+temp<-lapply(tofix,function(x) x@meta.data)%>%bind_rows()
+temp<-temp%>%rownames_to_column("cell")%>%
+  select(cell,seurat_clusters,pruned.labels)%>%
+  left_join(res,by=c("pruned.labels","seurat_clusters"))
+temp<-inte@meta.data%>%select(pruned.labels)%>%
+  rownames_to_column("cell")%>%left_join(temp%>%
+                                           select(cell,newlabel),by="cell")
+#manually fix small set that make no sense
+temp<-temp%>%mutate(newlabel=ifelse(is.na(newlabel),
+                                    pruned.labels,newlabel))
+temp<-temp%>%mutate(newlabel=ifelse(pruned.labels%in%
+                                      c("Gamma-Delta T-cells","C7-Activated-Fibro"),
+                                    paste0(newlabel," to discard"),newlabel))
+inte<-AddMetaData(inte,metadata = temp,col.name = "newlabel")
+
+```
+
+# Manually fix groups following Marcela's observations 
+```{r}
+i<-c("CD4 T-cells","Macrophages M1","Effector CD8 T-cells","C7-Fibro")
+tofix<-lapply(i,function(x) subset(inte,subset = newlabel==x))
+names(tofix)<-i
+
+tofix<-lapply(tofix,function(x) RunPCA(x,npcs=10,features=rownames(inte)))
+tofix<-lapply(tofix,function(x) harmony::RunHarmony(x,group.by.vars="Section"))
+tofix<-lapply(tofix,function(x) RunUMAP(x,reduction = "harmony",dims=1:10))
+tofix<-lapply(tofix,function(x) FindNeighbors(x,k.param = 15,reduction = "harmony"))
+tofix<-lapply(tofix,function(x) FindClusters(x,algorithm=4,resolution=.1))
+tofix$`Effector CD8 T-cells`<-FindClusters(tofix$`Effector CD8 T-cells`,resolution = .5,algorithm = 4)
+tofix$`C7-Fibro`<-FindClusters(tofix$`C7-Fibro`,resolution = .5,algorithm = 4)
+res <- lapply(tofix,function(x)
+  SingleR(test=x@assays$RNA$scale.data,#this
+          clusters=x$seurat_clusters,
+          ref=bulkref@assays$SCT$data, 
+          labels=bulkref@meta.data$sublabel, method = "cosine",
+               quantile = 0.999,tune.thresh = .1))
+res<-lapply(res,as.data.frame)
+#after inspection we don't agree with this labels
+#kept CD4 and effector CD8 grouped
+#and manually label M1 and C7 subclusters
+
+i<-tofix$`C7-Fibro`@meta.data%>%select(seurat_clusters)%>%rownames_to_column("cell")%>%
+  mutate(c7_cl=seurat_clusters)%>%select(-seurat_clusters)
+temp<-inte@meta.data%>%rownames_to_column("cell")%>%left_join(i)
+temp<-temp%>%mutate(c7_cl=ifelse(is.na(c7_cl),alt,c7_cl))
+inte<-AddMetaData(inte,metadata = temp,col.name = "c7_cl")
+
+i<-tofix$`Macrophages M1`@meta.data%>%select(seurat_clusters)%>%rownames_to_column("cell")%>%
+  mutate(m1_cl=seurat_clusters)%>%select(-seurat_clusters)
+temp<-inte@meta.data%>%rownames_to_column("cell")%>%left_join(i)
+temp<-temp%>%mutate(m1_cl=ifelse(is.na(m1_cl),alt,m1_cl))
+inte<-AddMetaData(inte,metadata = temp,col.name = "m1_cl")
+temp<-inte@meta.data%>%select(ct,pruned.labels,newlabel,m1_cl,c7_cl)%>%
+  rownames_to_column("cell")
+temp%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/prote_l0.2_labels.gz")
+```
