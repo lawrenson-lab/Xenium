@@ -242,13 +242,13 @@ res<-lapply(res,as.data.frame)
 i<-tofix$`C7-Fibro`@meta.data%>%select(seurat_clusters)%>%rownames_to_column("cell")%>%
   mutate(c7_cl=seurat_clusters)%>%select(-seurat_clusters)
 temp<-inte@meta.data%>%rownames_to_column("cell")%>%left_join(i)
-temp<-temp%>%mutate(c7_cl=ifelse(is.na(c7_cl),alt,c7_cl))
+temp<-temp%>%mutate(c7_cl=ifelse(is.na(c7_cl),newlabel,c7_cl))
 inte<-AddMetaData(inte,metadata = temp,col.name = "c7_cl")
 
 i<-tofix$`Macrophages M1`@meta.data%>%select(seurat_clusters)%>%rownames_to_column("cell")%>%
   mutate(m1_cl=seurat_clusters)%>%select(-seurat_clusters)
 temp<-inte@meta.data%>%rownames_to_column("cell")%>%left_join(i)
-temp<-temp%>%mutate(m1_cl=ifelse(is.na(m1_cl),alt,m1_cl))
+temp<-temp%>%mutate(m1_cl=ifelse(is.na(m1_cl),newlabel,m1_cl))
 inte<-AddMetaData(inte,metadata = temp,col.name = "m1_cl")
 temp<-inte@meta.data%>%select(ct,pruned.labels,newlabel,m1_cl,c7_cl)%>%
   rownames_to_column("cell")

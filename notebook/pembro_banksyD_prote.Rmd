@@ -180,6 +180,8 @@ Heatmap(t(concate),name="z_aggr",column_names_gp = gpar(fontsize=6),
 ```{r}
 matches<-as.data.frame(cbind(targeted_domain=matches,
                              domain_5k=str_remove(colnames(temp),"5k_")))
+write_csv(matches,"/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/domain_map.csv")
+
 temp<-inte5k@meta.data%>%rownames_to_column("cell")%>%
   mutate(res.0.5=as.character(res.0.5))%>%select(cell,res.0.5)%>%
   inner_join(matches,by=c("res.0.5"="domain_5k"))
@@ -191,6 +193,7 @@ i<-i[i>quantile(i,0.05)]
 pb<-subset(pb,subset=targeted_domain!="no",features = names(i))
 domDEG<-FindAllMarkers(pb,group.by = "targeted_domain",
                        min.cells.group = 2,logfc.threshold = 0)
+#domDEG<-FindAllMarkers(pb,group.by = "res.0.5",min.cells.group = 2,logfc.threshold = 0,return.thresh = 1) #to get LFC for all 
 # CD274 is not significant
 domDEG%>%filter(avg_log2FC>log2(1.5))%>%write_csv("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/5k_matcheDomains_DEG.csv")
 

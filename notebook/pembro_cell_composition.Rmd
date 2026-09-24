@@ -1,9 +1,9 @@
 ---
-title: "Cell composition"
+  title: "Cell composition"
 output: html_notebook
 ---
-
-
+  
+  
 ```{r}
 library(tidyverse)
 library(dbscan)
@@ -13,148 +13,90 @@ cols<-c("#E41A1C","#536D9E","#459E6E","cornflowerblue","gold","#F29022","#F781BF
         "#AD6D5E","#7D8285","#4385BF","#204175","#1B9E77","#98D486","#D2C92D","#EFAC4C",
         "#F47494","#D8227D","#910241","#18ABB8","#6ECDDC","#f46d43","#A82676","#655D9B",
         "#8CA77B","#17542A","#94A908","#C8DD34","#8FC9BF","white")
-files<-list.files("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro",full.names = T)
-files<-files[str_detect(files,"labels.gz")]
-files<-files[str_detect(files,"UTP",negate = T)]
 
-labels<-lapply(files,data.table::fread)
-files<-str_remove_all(files,".+bro.|bnk.+")
-names(labels)<-files
-labels<-lapply(files,function(x) labels[[x]]%>%mutate(Section=x))%>%bind_rows()
+labels<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_matrix/prote_l0.2_labels.gz")
+labels<-labels%>%mutate(m1_cl=case_when(m1_cl%in%c(1:4,"Dendritic Cells")~"Macrophages M2",
+                                        m1_cl==5~"Dendritic cells",TRUE~m1_cl))
+labels<-labels%>%mutate(c7_cl=case_when(c7_cl==1~"Mesenchymal cells",
+                                        c7_cl%in%c(2,4)~"Activated Fibro/CAF",
+                                        c7_cl==3~"C7-Activated Fibro",
+                                        c7_cl==5~"C7-Fibro",
+                                        c7_cl==6~"Activated Fibro",TRUE~m1_cl))
+labels<-labels%>%filter(str_detect(c7_cl,"disc",negate = T))%>%
+  mutate(finalabel=str_remove(c7_cl,"Effector "))
+labels<-labels%>%mutate(toplabel=case_when(str_detect(finalabel,"^B|Pla")~"B_Plasma",
+                                           str_detect(finalabel,"Fib|Mes|Smo")~"Mesenchymal",
+                                           str_detect(finalabel,"CD8")~"CD8 T-cells",
+                                           str_detect(finalabel,"Macr|Dend")~"Myeloid",
+                                           finalabel=="NK cells"~"Gamma_NK",TRUE~finalabel))
+
+files<-list.files("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro",full.names = T)
+files<-files[str_detect(files,"Prime")]
+labels_5k<-lapply(files,data.table::fread)
+names(labels_5k)<-str_remove_all(files,".+bro.|bnks.+")
+labels_5k<-lapply(names(labels_5k),function(x) labels_5k[[x]]%>%mutate(Section=x))%>%bind_rows()
+labels_5k<-labels_5k%>%mutate(cell=paste0(Section,'_',cell))
 ```
 
 # Coordinates
 ```{r}
+temp<-labels_5k%>%mutate(toplabel=str_replace(percl_toplabel,"EnS cells","Mesenchymal"),panel="5k")%>%
+  select(cell,toplabel,panel)
+temp<-labels%>%mutate(panel="targeted")%>%select(cell,toplabel,panel)%>%bind_rows(temp)
+
 coords<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
 coords5k<-data.table::fread("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")
-
-temp<-coords%>%select(x_centroid,y_centroid)%>%dbscan(eps = 100)
-coords$circle<-temp$cluster
-#meta<-meta%>%mutate(circle=ifelse(circle==5&y_centroid>6000,500,circle))
-coords<-coords%>%mutate(Core_ID=case_when(circle%in%c(40:42)~'1',
-                                      circle%in%c(1,38,39)~'2',#1
-                                      circle%in%c(2,6,37)~'3',#1
-                                      circle%in%c(36,14,13)~'4',#1
-                                      circle%in%c(12,8,15)~'5',#1
-                                      circle%in%c(7,29,35)~'10',#1
-                                      circle%in%c(5,34,30)~'9',#1
-                                      circle%in%c(16:18)~'7',#1
-                                      circle%in%c(9:11)~'6',#1
-                                      circle%in%c(28,27,25)~'11',#1
-                                      circle%in%c(26,24,19)~'12',#1
-                                      circle%in%c(21:23)~'13',#1
-                                      circle%in%c(4,3,44)~'14',#1
-                                      circle%in%c(74,75,69)~'19',#2
-                                      circle%in%c(70,67,66)~'18',#2
-                                      circle%in%c(61,60,54)~'17',#2
-                                      circle%in%c(50,52,53)~'16',#2
-                                      circle%in%c(51,47,49)~'15',#2
-                                      circle%in%c(73,68,71)~'20',#2
-                                      circle%in%c(72,59,58)~'21',#2
-                                      circle%in%c(55:57)~'22',#2
-                                      circle%in%c(62:64)~'23',#2
-                                      circle%in%c(65,48,76)~'24',#2
-                                      circle%in%c(82:84)~'26',#3
-                                      circle%in%c(81)~'25',#3
-                                      circle%in%c(89,85)~'28',#3
-                                      circle%in%c(92,91)~'29',#3
-                                      circle%in%c(80,79)~'30',
-                                      circle%in%c(77,78)~'31',
-                                      TRUE~"discarded"))
-names(cols)<-sort(unique(coords$Core_ID))
-coords%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=Core_ID))+geom_point(size=.1)+
-  geom_text(data=coords%>%group_by(circle)%>%summarise(x_centroid=median(x_centroid),
-                                                     y_centroid=median(y_centroid)),aes(label=circle),col="black")+
-  guides(col=guide_legend(override.aes = list(size=3)))+scale_color_manual(values=cols)
-
-temp<-coords5k%>%select(x_centroid,y_centroid)%>%dbscan(eps = 100)
-coords5k$circle<-temp$cluster
-coords5k<-coords5k%>%mutate(circle=ifelse(circle==4&y_centroid>6000,400,circle))
-coords5k<-coords5k%>%mutate(Core_ID=case_when(circle<4~'1',
-                                      circle%in%c(4,8,9)~'2',#1
-                                      circle%in%c(5,6,400)~'3',#2
-                                      circle%in%c(13:15)~'4',#3
-                                      circle%in%c(11,12,16)~'5',#3
-                                      circle%in%c(23:25)~'9',#4
-                                      circle%in%c(20:22)~'7',#4
-                                      circle%in%c(17:19)~'6',#4
-                                      circle%in%c(43,44)~'10',#5
-                                      circle%in%c(52,51,36)~'11',#5
-                                      circle%in%c(37,35,38)~'12',#5
-                                      circle%in%c(32:34)~'13',#5
-                                      circle%in%c(53:55)~'16',#5
-                                      circle%in%c(56:58)~'17',#5
-                                      circle%in%c(46:48)~'18',#5
-                                      circle%in%c(40:42)~'19',#5
-                                      circle%in%c(39,49,50)~'20',#5
-                                      circle%in%c(70,60,63)~'14',#6
-                                      circle%in%c(69,62,61)~'15',#6
-                                      circle%in%c(64:66)~'23',#6
-                                      circle%in%c(72,73,68)~'24',#6
-                                      circle%in%c(79,81,82)~'21',#7
-                                      circle%in%c(78,76,74)~'22',#7
-                                      circle%in%c(91,90,88)~'26',#8
-                                      circle%in%c(87)~'25',#8
-                                      circle%in%c(93,92)~'28',#8
-                                      circle%in%c(86,101)~'29',#8
-                                      circle%in%c(99,97)~'30',#8
-                                      circle%in%c(100,98)~'31',
-                                      TRUE~"discarded"))
-
-coords<-coords%>%mutate(panel="Protein")
+coords<-coords%>%mutate(panel="targeted")
 coords<-coords5k%>%mutate(panel="5k")%>%bind_rows(coords)
+temp<-coords%>%select(cell_id,x_centroid,y_centroid,circle,Core_ID)%>%inner_join(temp,by=c("cell_id"="cell"))
+temp<-temp%>%add_count(panel,circle)%>%filter(n>500)
 
-#coords%>%filter(panel=="Protein")%>%select(-panel)%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains.gz")
-#coords%>%filter(panel=="5k")%>%select(-panel)%>%data.table::fwrite("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/Banksy_domains5k.gz")
-```
+cellcols<-c(Epithelial="#F29022","CD4 T-cells"="#18ABB8","unknown"="#AD6D5E",
+            "B_Plasma"="#C8DD34","Myeloid"="#F781BF",
+            "Mesenchymal"="#204175","Endothelial cells"="#E41A1C",
+            "CD8 T-cells"="gold","Gamma_NK" ="#910241")
+plots<-lapply(unique(temp$Core_ID),function(i)
+    temp%>%filter(Core_ID==i)%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=toplabel))+
+      geom_point(size=.1)+facet_grid(cols=vars(panel),scales="free",space="free")+
+      scale_color_manual(values=cellcols)+guides(col=guide_legend(override.aes = list(size=3)))+
+     ggtitle(paste0("Core_ID=",i))+theme(legend.position = "n"))
 
-# Plot
-```{r}
-cols<-c("#F29022","#536D9E","#459E6E","gray","#F781BF","#C598C9",
-        "#4385BF","#18ABB8","#910241","#E41A1C","#8FC9BF","white")
-names(cols)<-unique(labels$percl_toplabel)
-
-labels<-labels%>%mutate(cell_id=paste0(Section,"_",cell))
-labels<-coords%>%select(cell_id,x_centroid,y_centroid,panel,circle,Core_ID,responder)%>%inner_join(labels)
-labels<-labels%>%add_count(panel,circle)%>%filter(n>500)
-
-plots<-lapply(unique(labels$Core_ID),function(i)
-  labels%>%filter(Core_ID==i)%>%ggplot(aes(x=-x_centroid,y=-y_centroid,col=percl_toplabel))+
-    geom_point(size=.1)+facet_grid(cols=vars(panel),scales="free",space="free")+
-    scale_color_manual(values=cols)+guides(col=guide_legend(override.aes = list(size=3)))+
-    ggtitle(paste0("Core_ID=",i))+theme(legend.position = "n"))
-
-labels%>%count(percl_toplabel)%>%ggplot(aes(x=n,y=percl_toplabel,fill=percl_toplabel))+geom_col()+geom_text(aes(label=n))+scale_fill_manual(values=cols)+theme(legend.position = "n")
+p0<-temp%>%count(toplabel,panel)%>%ggplot(aes(x=n,y=toplabel,fill=toplabel))+
+  geom_col()+geom_text(aes(label=n))+scale_fill_manual(values=cellcols)+
+  theme(legend.position = "n")+facet_grid(~panel)+scale_x_log10()
 ```
 
 # Contrast
 ```{r}
-temp<-read_tsv("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/PEmbro_TMA_deidentified.tsv")
-labels<-labels%>%mutate(Core_ID=as.numeric(Core_ID))%>%left_join(temp,by = c("Core_ID"="Core ID"))
+annot<-read_tsv("/media/Lawrenson_Lab_NAS/uthscsa/group_data/Xenium_labels/pembro/PEmbro_TMA_deidentified.tsv")
+temp<-temp%>%mutate(Core_ID=as.numeric(Core_ID))%>%left_join(annot,by = c("Core_ID"="Core ID"))
 
-temp<-labels%>%filter(panel=="Protein")
 temp<-temp%>%mutate(Gr=ifelse(responder==T,"responder","non_responder"))
 run_speckle<-function(metadata){
-  props<-getTransformedProps(metadata$percl_toplabel,
-                           metadata$StudyID)
+  props<-getTransformedProps(metadata$toplabel,
+                             metadata$StudyID)
   ids<-metadata%>%distinct(Gr,StudyID)
   designM<-model.matrix(~0+Gr,data=ids)#but Cores are not independent 
-
+  
   props<-props$TransformedProps[,ids$StudyID]
   fit<-lmFit(props,designM)
   cont<-makeContrasts(Grresponder-Grnon_responder,levels = designM)
   fit<-contrasts.fit(fit,cont)
   fit <- eBayes(fit, robust=TRUE)
   res<-topTable(fit,number = nrow(props),coef = 1)
-return(res)}
-proteinres<-run_speckle(temp)
-temp<-labels%>%filter(panel=="5k")
-temp<-temp%>%mutate(Gr=ifelse(responder==T,"responder","non_responder"))
-res5k<-run_speckle(temp)
+  return(res)}
+proteinres<-temp%>%filter(panel=="targeted")%>%run_speckle()
+res5k<-temp%>%filter(panel=="5k")%>%run_speckle()
 
-temp<-proteinres%>%rownames_to_column("ct")%>%mutate(proteinLFC=logFC)%>%select(ct,proteinLFC)
-temp<-res5k%>%rownames_to_column("ct")%>%mutate(LFC5k=logFC)%>%select(ct,LFC5k)%>%inner_join(temp)
-temp%>%ggplot(aes(x=proteinLFC,y=LFC5k,col=ct,label=ct))+geom_point(size=3)+geom_text_repel()+scale_color_manual(values=cols)+geom_vline(xintercept = 0)+geom_hline(yintercept = 0)
+toplot<-proteinres%>%rownames_to_column("ct")%>%
+  mutate(targetedLFC=logFC)%>%select(ct,targetedLFC)
+toplot<-res5k%>%rownames_to_column("ct")%>%
+  mutate(LFC5k=logFC)%>%select(ct,LFC5k)%>%inner_join(toplot)
+toplot%>%ggplot(aes(x=targetedLFC,y=LFC5k))+
+  geom_point(aes(col=ct,label=ct),size=3)+
+  geom_text_repel(aes(col=ct,label=ct))+
+  scale_color_manual(values=cols)+
+  geom_smooth(method = "lm")
 ```
 
 # Verify markers
@@ -190,39 +132,58 @@ j<-c("KIT","TPSAB1","SIGLEC8","PTPRC","CD79A","BANK1","MS4A1",
      "PAX8","ESR1","FOXJ1","PAEP","PECAM1","PGR","IGF1","MMP11","FOXO1",
      "DCN","PDGFRA","THY1","COL1A1","ACTA2","TAGLN","MYL9","FAP","C7","GAS5")
 DotPlot(inte,group.by = "percl_toplabel",features = j)+
-scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
   theme(axis.text.x = element_text(angle=45,vjust = 1,hjust = 1))
 
 ```
 
-## Protein panel
+# Domain composition
+```{r}
+labels<-labels%>%inner_join(coords,by=c("cell"="cell_id"))
+labels<-labels%>%mutate(Core_ID=as.numeric(Core_ID))%>%
+  left_join(annot,by = c("Core_ID"="Core ID"))
+
+toplot<-labels%>%count(res.0.5,responder)%>%
+  group_by(res.0.5)%>%mutate(prop=n/sum(n))%>%arrange(prop)
+p0<-toplot%>%mutate(res.0.5=factor(res.0.5,
+                                   levels=toplot%>%filter(responder==T)%>%
+                                     select(res.0.5)%>%unlist()))%>%
+  ggplot(aes(x=res.0.5,y = n,fill=responder))+
+  geom_bar(stat="identity",position="fill")
+p1<-labels%>%distinct(res.0.5,StudyID)%>%count(res.0.5)%>%
+  mutate(res.0.5=factor(res.0.5,levels=levels(p0$data$res.0.5)))%>%
+  ggplot(aes(x=res.0.5,y=n))+geom_col()+labs(y="StudyID")
+p2<-labels%>%count(res.0.5,toplabel)%>%
+  mutate(res.0.5=factor(res.0.5,levels=levels(p0$data$res.0.5)))%>%
+  ggplot(aes(x=res.0.5,y = n,fill=toplabel))+
+  geom_bar(stat="identity",position="fill")+
+  scale_fill_manual(values = cellcols)
+
+```
+
+# PD1 in D14?
 ```{r}
 files<-list.files("/media/Xenium_On_NAS/xenium_reanalysis",full.names = T)
 files<-files[str_detect(files,"Pro")]
 files<-files[str_detect(files,"UTP",negate=T)]
 xenium.list<-lapply(files, function(x) Read10X_h5(paste0(x,"/outs/cell_feature_matrix.h5")))
+names(xenium.list)<-str_remove(files,".+sis.")
 
 prote.list<-lapply(xenium.list,function(x) x$`Protein Expression`)
-names(xenium.list)<-str_remove(files,".+sis.")
-names(prote.list)<-str_remove(files,".+sis.")
+inteP<-lapply(prote.list, CreateSeuratObject)
+inteP<-merge(inteP[[1]],y = inteP[names(inteP)[-1]],
+             add.cell.ids =names(inteP))
+inteP<-subset(inteP,cell = labels$cell)
+#sum(colnames(inteP)==rownames(clus))
+inteP<-AddMetaData(inteP,metadata = labels%>%column_to_rownames("cell"))
+inteP<-NormalizeData(inteP) #CLR???
+inteP<-ScaleData(inteP)
 
-xenium.list<-lapply(xenium.list,function(x) x$`Gene Expression`)
-xenium.list<-lapply(xenium.list,function(x) CreateSeuratObject(counts = x))
-inte<-merge(xenium.list[[1]],y = xenium.list[names(xenium.list)[-1]],
-            add.cell.ids =names(xenium.list))
-inte<-subset(inte,cells = labels$cell_id)
-temp<-labels%>%filter(cell_id%in%colnames(inte))
-temp<-temp[order(match(temp$cell_id,colnames(inte))),]
-inte<-AddMetaData(inte,metadata = temp%>%column_to_rownames("cell_id"),col.name = "percl_toplabel")
-DotPlot(inte,group.by = "percl_toplabel",features = j)+
-    scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
-    theme(axis.text.x = element_text(angle=45,vjust = 1,hjust = 1))
-
-prote.list<-lapply(prote.list,function(x) CreateSeuratObject(counts = x))
-inteP<-merge(prote.list[[1]],y = prote.list[names(prote.list)[-1]],
-            add.cell.ids =names(prote.list))
-inteP<-subset(inteP,cells = labels$cell_id)
-inteP<-AddMetaData(inteP,metadata = temp%>%column_to_rownames("cell_id"),col.name = "percl_toplabel")
-DotPlot(inteP,group.by = "percl_toplabel",features = rownames(inteP))+
-    scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
-    theme(axis.text.x = element_text(angle=45,vjust = 1,hjust = 1))
+DotPlot(subset(inteP,subset = finalabel%in%c("Exhausted CD8 T-cells","CD8 T-cells")),
+        group.by = "res.0.5",features = c("PD-1","PD-L1"))+
+  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  ggtitle("All CD8 T-cells")+labs(y="Domain")
+DotPlot(inteP,group.by = "res.0.5",features = c("PD-1","PD-L1"))+
+  scale_color_gradient2(low="#2166ac", mid = "#f7f7f7", high = "#b2182b")+
+  ggtitle("All cells")+labs(y="Domain")
+```
