@@ -15,9 +15,11 @@ Working pipeline for pembro subset
 6. notebook/pembro_banksyD_prote.Rmd
    Output: Response association, markers and correlation between targeted and 5k domains
    This may need improvements 
-7. notebook/pembro_cell_composition.Rmd
-   Output: Domain composition, markers 
+7. notebook/pembro_cell_composition.Rmd. Output: Domain composition, markers
+8. script/pembro_delaunay.R only for samples with the targeted panel.
+   Output: Cell to cell interactions/neighbors with distance between them.
+   May need an improved distance filter to keep better interacting partners
    
-8. notebook/pembro_PD1summary.Rmd
+9. notebook/pembro_PD1summary.Rmd
    Output: PD1, PDL1, PanCK, CD45 summary
     This absolutely needs improvements
